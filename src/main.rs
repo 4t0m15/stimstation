@@ -1,3 +1,3 @@
 fn main() {
-    println!("setting up my twttr");
+    println!("twttr setup");
 }

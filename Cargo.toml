@@ -4,12 +4,3 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-egui = { version = "0.31.1", optional = true }
-eframe = { version = "0.31.1", optional = true }
-[features]
-default = ["egui", "eframe"]
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-console_error_panic_hook = "0.1.7"
-tracing-wasm = "0.2"
-wasm-bindgen-futures = "0.4"

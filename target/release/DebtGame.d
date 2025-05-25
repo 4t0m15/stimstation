@@ -1,1 +1,1 @@
-/Users/Admin/stimstation/stimstation/target/release/DebtGame: /Users/Admin/stimstation/stimstation/src/main.rs
+C:\Users\arsen\stimstation\stimstation\target\release\DebtGame.exe: C:\Users\arsen\stimstation\stimstation\src\main.rs

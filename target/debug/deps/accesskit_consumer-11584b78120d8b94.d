@@ -1,0 +1,10 @@
+C:\Users\arsen\stimstation\stimstation\target\debug\deps\libaccesskit_consumer-11584b78120d8b94.rmeta: C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\lib.rs C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\tree.rs C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\node.rs C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\filters.rs C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\iterators.rs C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\text.rs
+
+C:\Users\arsen\stimstation\stimstation\target\debug\deps\accesskit_consumer-11584b78120d8b94.d: C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\lib.rs C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\tree.rs C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\node.rs C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\filters.rs C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\iterators.rs C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\text.rs
+
+C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\lib.rs:
+C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\tree.rs:
+C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\node.rs:
+C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\filters.rs:
+C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\iterators.rs:
+C:\Users\arsen\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\accesskit_consumer-0.26.0\src\text.rs:

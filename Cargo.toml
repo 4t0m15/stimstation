@@ -4,14 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-winit = "0.29.15"
 pixels = "0.15.0"
-rand = "0.9.1"
+winit = "0.29.15"
 winit_input_helper = "0.16.0"
+rand = "0.8.5"
 rodio = "0.20.1"
+font-kit = "0.14.2"
+ab_glyph = "0.2"
+once_cell = "1.19"
+plotters = { version = "0.3.7", optional = true }
 
 # Visual proofs dependencies (excluding eframe)
-plotters = { version = "0.3.7", optional = true }
 macroquad = { version = "0.4.14", optional = true }
 image = { version = "0.25.6", optional = true }
 

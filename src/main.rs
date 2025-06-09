@@ -1,15 +1,17 @@
 use pixels::{Error, Pixels, SurfaceTexture};
-use rand::Rng;
+use rand::prelude::*;
+use rand::thread_rng;
 use std::sync::Arc;
 use winit::{
 	dpi::LogicalSize,
 	event::{MouseButton},
 	keyboard::KeyCode,
 	event_loop::EventLoop,
-	window::{Window, WindowBuilder},
+	window::{WindowBuilder},
 };
 use winit_input_helper::WinitInputHelper;
 use std::time::{Duration, Instant};
+use std::collections::VecDeque;
 
 // Import our circular visuals implementation
 mod mesmerise_circular;
@@ -45,11 +47,11 @@ struct Line {
 }
 
 impl Line {
-	fn new(rng: &mut impl Rng) -> Self {
+	fn new(rng: &mut ThreadRng) -> Self {
 		let x = rng.gen_range(0.0..WIDTH as f32);
 		let y = rng.gen_range(0.0..HEIGHT as f32);
-		let speed = rng.gen_range(0.5..2.5);  // Increased speed range
-		let length = rng.gen_range(30.0..120.0);  // Line length
+		let speed = rng.gen_range(0.5..2.5);
+		let length = rng.gen_range(30.0..120.0);
 		
 		Self {
 			pos: [
@@ -65,14 +67,14 @@ impl Line {
 				rng.gen_range(50..200),
 				rng.gen_range(150..255),
 			],
-			width: rng.gen_range(1.0..3.5),  // Slightly thicker lines
+			width: rng.gen_range(1.0..3.5),
 			length,
-			cycle_speed: rng.gen_range(0.2..1.5),  // Color cycling speed
-			cycle_offset: rng.gen_range(0.0..10.0),  // Random offset
+			cycle_speed: rng.gen_range(0.2..1.5),
+			cycle_offset: rng.gen_range(0.0..10.0),
 		}
 	}
 	
-	fn update(&mut self, rng: &mut impl Rng, time: f32, mouse_pos: Option<(f32, f32)>) {
+	fn update(&mut self, rng: &mut ThreadRng, time: f32, mouse_pos: Option<(f32, f32)>) {
 		// Color cycling based on time
 		let hue = (time * self.cycle_speed + self.cycle_offset) % 1.0;
 		self.color = hsv_to_rgb(hue, 0.8, 0.9);
@@ -136,7 +138,7 @@ impl Line {
 		}
 		
 		// Occasionally change velocity with small random adjustments
-		if rng.gen_bool(0.02) {
+		if rng.gen::<f64>() < 0.02 {
 			for i in 0..2 {
 				self.vel[i].0 = (self.vel[i].0 + rng.gen_range(-0.15..0.15)).clamp(-3.0, 3.0);
 				self.vel[i].1 = (self.vel[i].1 + rng.gen_range(-0.15..0.15)).clamp(-3.0, 3.0);
@@ -209,7 +211,7 @@ impl Particle {
 
 struct World {
 	lines: Vec<Line>,
-	rng: rand::rngs::ThreadRng,
+	rng: ThreadRng,
 	start_time: Instant,
 	mouse_pos: Option<(f32, f32)>,
 	mouse_active: bool,
@@ -227,9 +229,48 @@ enum VisualMode {
 	Rainbow,  // New rainbow mode
 }
 
+// Add a struct to track FPS
+struct FpsCounter {
+	frame_times: VecDeque<Instant>,
+	last_update: Instant,
+	current_fps: f32,
+	update_interval: Duration,
+}
+
+impl FpsCounter {
+	fn new() -> Self {
+		Self {
+			frame_times: VecDeque::with_capacity(100),
+			last_update: Instant::now(),
+			current_fps: 0.0,
+			update_interval: Duration::from_millis(500), // Update FPS display every 500ms
+		}
+	}
+
+	fn update(&mut self) {
+		let now = Instant::now();
+		self.frame_times.push_back(now);
+
+		// Remove frames older than 1 second
+		while !self.frame_times.is_empty() && now.duration_since(*self.frame_times.front().unwrap()).as_secs_f32() > 1.0 {
+			self.frame_times.pop_front();
+		}
+
+		// Update the FPS calculation every update_interval
+		if now.duration_since(self.last_update) >= self.update_interval {
+			self.current_fps = self.frame_times.len() as f32;
+			self.last_update = now;
+		}
+	}
+
+	fn fps(&self) -> f32 {
+		self.current_fps
+	}
+}
+
 impl World {
 	fn new() -> Self {
-		let mut rng = rand::thread_rng();
+		let mut rng = thread_rng();
 		Self {
 			lines: (0..MAX_LINES).map(|_| Line::new(&mut rng)).collect(),
 			rng,
@@ -341,11 +382,10 @@ impl World {
 		}
 		
 		// Spawn new lines when mouse button is held
-		if self.mouse_active && self.rng.gen_bool(0.1) {
+		if self.mouse_active && self.rng.gen::<f64>() < 0.1 {
 			if let Some((x, y)) = self.mouse_pos {
-				if self.lines.len() < MAX_LINES * 2 {  // Allow more lines when user is active
+				if self.lines.len() < MAX_LINES * 2 {
 					let mut new_line = Line::new(&mut self.rng);
-					// Start near mouse position
 					new_line.pos[0] = (x, y);
 					new_line.pos[1] = (
 						x + self.rng.gen_range(-new_line.length/2.0..new_line.length/2.0),
@@ -363,9 +403,9 @@ impl World {
 		
 		// Maintain line count target (slowly adjust)
 		if !self.mouse_active {
-			if self.lines.len() < self.target_line_count && self.rng.gen_bool(0.1) {
+			if self.lines.len() < self.target_line_count && self.rng.gen::<f64>() < 0.1 {
 				self.lines.push(Line::new(&mut self.rng));
-			} else if self.lines.len() > self.target_line_count && self.rng.gen_bool(0.1) {
+			} else if self.lines.len() > self.target_line_count && self.rng.gen::<f64>() < 0.1 {
 				self.lines.remove(0);
 			}
 		}
@@ -668,9 +708,12 @@ fn run_combined() -> Result<(), Error> {
 	let mut last_frame = Instant::now();
 	let target_frame_time = Duration::from_secs_f32(1.0 / 60.0); // 60 FPS target
 	
+	// Initialize FPS counter
+	let mut fps_counter = FpsCounter::new();
+	
 	// Track fullscreen state
 	let mut is_fullscreen = false;
-	
+
 	// Set the window title to match the initial state
 	window.set_title("Mesmerise - Combined Visualizations");
 
@@ -869,55 +912,76 @@ fn run_combined() -> Result<(), Error> {
 			}
 		}
 
-		// Update and render with frame rate limiting
-		if last_frame.elapsed() >= target_frame_time {
-			world.update();
-			
-			// Clear the frame
-			for pixel in pixels.frame_mut().chunks_exact_mut(4) {
-				// Default to black
-				pixel[0] = 0; // R
-				pixel[1] = 0; // G
-				pixel[2] = 0; // B
-				pixel[3] = 255; // A
-			}
-			
-			// Draw the appropriate visualization based on active side
-			let elapsed = start_time.elapsed().as_secs_f32();
-			
-			match active_side {
-				ActiveSide::Original => {
-					// Draw only the original lines visualization
-					draw_original(&mut pixels, &world);
-				},
-				ActiveSide::Circular => {
-					// Draw only the circular visualization
-					draw_circular(&mut pixels, elapsed);
-				},
-				ActiveSide::Full => {
-					// Draw the full screen with multiple visualizations
-					draw_full_screen(&mut pixels, &world, elapsed);
-				},
-				ActiveSide::RayPattern => {
-					// Draw only the ray pattern
-					draw_ray_pattern(&mut pixels, elapsed);
-				},
-			}
-			
-			// ALWAYS draw the particle fountain no matter what
-			let frame = pixels.frame_mut();
-			draw_particle_fountain(frame, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, elapsed);
-			
-			// Render the current frame
-			if let Err(err) = pixels.render() {
-				eprintln!("Pixels render error: {err}");
-				window_target.exit();
-				return;
-			}
-			
-			// Request redraw
-			window_clone.request_redraw();
-			last_frame = Instant::now();
+		// Separate rendering logic from input handling
+		match event {
+			winit::event::Event::WindowEvent { 
+				event: winit::event::WindowEvent::RedrawRequested, 
+				.. 
+			} => {
+				// Only update and render if enough time has passed since the last frame
+				if last_frame.elapsed() >= target_frame_time {
+					world.update();
+					
+					// Clear the frame
+					for pixel in pixels.frame_mut().chunks_exact_mut(4) {
+						// Default to black
+						pixel[0] = 0; // R
+						pixel[1] = 0; // G
+						pixel[2] = 0; // B
+						pixel[3] = 255; // A
+					}
+					
+					// Draw the appropriate visualization based on active side
+					let elapsed = start_time.elapsed().as_secs_f32();
+					
+					match active_side {
+						ActiveSide::Original => {
+							// Draw only the original lines visualization
+							draw_original(&mut pixels, &world);
+						},
+						ActiveSide::Circular => {
+							// Draw only the circular visualization
+							draw_circular(&mut pixels, elapsed);
+						},
+						ActiveSide::Full => {
+							// Draw the full screen with multiple visualizations
+							draw_full_screen(&mut pixels, &world, elapsed);
+						},
+						ActiveSide::RayPattern => {
+							// Draw only the ray pattern
+							draw_ray_pattern(&mut pixels, elapsed);
+						},
+					}
+					
+					// ALWAYS draw the particle fountain no matter what
+					let frame = pixels.frame_mut();
+					draw_particle_fountain(frame, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, elapsed);
+					
+					// Update FPS counter
+					fps_counter.update();
+					
+					// Draw FPS counter in the bottom left
+					let fps_text = format!("FPS: {:.1}", fps_counter.fps());
+					draw_text(frame, &fps_text, 10, HEIGHT as i32 - 30, [255, 255, 0, 255], WIDTH);
+					
+					// Render the current frame
+					if let Err(err) = pixels.render() {
+						eprintln!("Pixels render error: {err}");
+						window_target.exit();
+						return;
+					}
+					
+					last_frame = Instant::now();
+					
+					// Schedule next frame
+					window_clone.request_redraw();
+				}
+			},
+			winit::event::Event::AboutToWait => {
+				// Request redraw when the event loop is about to wait
+				window_clone.request_redraw();
+			},
+			_ => {},
 		}
 	}).unwrap();
 	
@@ -1329,4 +1393,166 @@ fn draw_ray_pattern(pixels: &mut Pixels, time: f32) {
 	// Draw the ray pattern directly to the frame buffer using the full width and height
 	// Use the actual WIDTH and HEIGHT for ray pattern to fill the entire buffer
 	ray_pattern::draw_frame(frame, WIDTH, HEIGHT, time, 0, WIDTH);
+}
+
+// Draw text with a simple font
+fn draw_text(frame: &mut [u8], text: &str, x: i32, y: i32, color: [u8; 4], width: u32) {
+	let char_width = 8;
+	let char_height = 15;
+	let height = frame.len() / (4 * width as usize);
+	
+	// Early return if text would be completely off-screen
+	if y + char_height < 0 || y >= height as i32 {
+		return;
+	}
+	
+	for (i, c) in text.chars().enumerate() {
+		let cx = x + (i as i32 * char_width);
+		
+		// Skip if this character is outside frame
+		if cx + char_width < 0 || cx >= width as i32 {
+			continue;
+		}
+		
+		// Draw character (simple 7-segment style)
+		match c {
+			'F' => {
+				draw_segment(frame, cx, y, true, false, true, false, true, false, false, color, width);
+			},
+			'P' => {
+				draw_segment(frame, cx, y, true, false, true, true, true, false, false, color, width);
+			},
+			'S' => {
+				draw_segment(frame, cx, y, true, true, false, true, false, true, true, color, width);
+			},
+			':' => {
+				// Draw two dots
+				for dy in 0..2 {
+					for dx in 0..2 {
+						set_pixel_safe(frame, cx + 3 + dx, y + 4 + dy, width, height as u32, color);
+						set_pixel_safe(frame, cx + 3 + dx, y + 10 + dy, width, height as u32, color);
+					}
+				}
+			},
+			'.' => {
+				// Draw a single dot
+				for dy in 0..2 {
+					for dx in 0..2 {
+						set_pixel_safe(frame, cx + 3 + dx, y + char_height - 3 + dy, width, height as u32, color);
+					}
+				}
+			},
+			'0' => {
+				draw_segment(frame, cx, y, true, true, true, false, true, true, true, color, width);
+			},
+			'1' => {
+				draw_segment(frame, cx, y, false, false, true, false, false, true, false, color, width);
+			},
+			'2' => {
+				draw_segment(frame, cx, y, true, true, false, true, true, false, true, color, width);
+			},
+			'3' => {
+				draw_segment(frame, cx, y, true, true, true, true, false, false, true, color, width);
+			},
+			'4' => {
+				draw_segment(frame, cx, y, false, false, true, true, false, true, true, color, width);
+			},
+			'5' => {
+				draw_segment(frame, cx, y, true, true, true, true, false, true, false, color, width);
+			},
+			'6' => {
+				draw_segment(frame, cx, y, true, true, true, true, true, true, false, color, width);
+			},
+			'7' => {
+				draw_segment(frame, cx, y, true, false, true, false, false, true, false, color, width);
+			},
+			'8' => {
+				draw_segment(frame, cx, y, true, true, true, true, true, true, true, color, width);
+			},
+			'9' => {
+				draw_segment(frame, cx, y, true, true, true, true, false, true, true, color, width);
+			},
+			' ' => {},
+			_ => {
+				// Draw a rectangle for unknown characters
+				for dy in 0..char_height {
+					for dx in 0..char_width {
+						if dx == 0 || dx == char_width - 1 || dy == 0 || dy == char_height - 1 {
+							set_pixel_safe(frame, cx + dx, y + dy, width, height as u32, color);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// Helper function to draw 7-segment display style characters
+// Segments: a=top, b=top-right, c=bottom-right, d=bottom, e=bottom-left, f=top-left, g=middle
+fn draw_segment(frame: &mut [u8], x: i32, y: i32, a: bool, b: bool, c: bool, d: bool, e: bool, f: bool, g: bool, color: [u8; 4], width: u32) {
+	let height = frame.len() / (4 * width as usize);
+	let thickness = 2;
+	
+	// Segment a (top horizontal)
+	if a {
+		for dy in 0..thickness {
+			for dx in 0..6 {
+				set_pixel_safe(frame, x + 1 + dx, y + dy, width, height as u32, color);
+			}
+		}
+	}
+	
+	// Segment b (top-right vertical)
+	if b {
+		for dy in 0..7 {
+			for dx in 0..thickness {
+				set_pixel_safe(frame, x + 6 - dx, y + 1 + dy, width, height as u32, color);
+			}
+		}
+	}
+	
+	// Segment c (bottom-right vertical)
+	if c {
+		for dy in 0..7 {
+			for dx in 0..thickness {
+				set_pixel_safe(frame, x + 6 - dx, y + 8 + dy, width, height as u32, color);
+			}
+		}
+	}
+	
+	// Segment d (bottom horizontal)
+	if d {
+		for dy in 0..thickness {
+			for dx in 0..6 {
+				set_pixel_safe(frame, x + 1 + dx, y + 14 - dy, width, height as u32, color);
+			}
+		}
+	}
+	
+	// Segment e (bottom-left vertical)
+	if e {
+		for dy in 0..7 {
+			for dx in 0..thickness {
+				set_pixel_safe(frame, x + dx, y + 8 + dy, width, height as u32, color);
+			}
+		}
+	}
+	
+	// Segment f (top-left vertical)
+	if f {
+		for dy in 0..7 {
+			for dx in 0..thickness {
+				set_pixel_safe(frame, x + dx, y + 1 + dy, width, height as u32, color);
+			}
+		}
+	}
+	
+	// Segment g (middle horizontal)
+	if g {
+		for dy in 0..thickness {
+			for dx in 0..6 {
+				set_pixel_safe(frame, x + 1 + dx, y + 7 + dy, width, height as u32, color);
+			}
+		}
+	}
 }

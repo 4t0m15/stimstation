@@ -1,5 +1,9 @@
 // Ray pattern visualization inspired by the yellow and green rays image
-use rand::Rng;
+use ab_glyph::{Font as _, FontArc, Glyph, PxScale};
+use font_kit::source::SystemSource;
+use font_kit::properties::Properties;
+use once_cell::sync::Lazy;
+use rand::prelude::*;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use rodio::{OutputStream, Sink, Source};
@@ -52,18 +56,13 @@ enum SortState {
 
 impl SortVisualizer {
     fn new(algorithm: SortAlgorithm) -> Self {
-        // Create a properly sized array from 1 to SORT_ARRAY_SIZE
         let mut array = Vec::with_capacity(SORT_ARRAY_SIZE);
         for i in 1..=SORT_ARRAY_SIZE {
-            array.push((i % 255) as u8); // Ensure values fit in u8
+            array.push((i % 255) as u8);
         }
         
-        let mut rng = rand::thread_rng();
-        // Shuffle the array for sorting
-        for i in 0..array.len() {
-            let j = rng.gen_range(0..array.len());
-            array.swap(i, j);
-        }
+        let mut rng = thread_rng();
+        array.shuffle(&mut rng);
         
         Self {
             array,
@@ -80,21 +79,14 @@ impl SortVisualizer {
     }
     
     fn update(&mut self) {
-        // Skip if completed
         if self.state == SortState::Completed {
             return;
         }
         
-        // Reset if restarting
         if self.state == SortState::Restarting {
-            // Shuffle the array again
-            let mut rng = rand::thread_rng();
-            for i in 0..self.array.len() {
-                let j = rng.gen_range(0..self.array.len());
-                self.array.swap(i, j);
-            }
+            let mut rng = thread_rng();
+            self.array.shuffle(&mut rng);
             
-            // Reset state
             self.state = SortState::Running;
             self.steps = 0;
             self.i = 0;
@@ -103,7 +95,6 @@ impl SortVisualizer {
             self.accesses = 0;
             self.stack.clear();
             
-            // For quicksort, initialize the stack
             if self.algorithm == SortAlgorithm::Quick {
                 self.stack.push((0, self.array.len() - 1));
             }
@@ -111,23 +102,19 @@ impl SortVisualizer {
             return;
         }
         
-        // Update based on algorithm
         match self.algorithm {
             SortAlgorithm::Bogo => self.update_bogo(),
             SortAlgorithm::Bubble => self.update_bubble(),
             SortAlgorithm::Quick => self.update_quick(),
         }
         
-        // Increment steps
         self.steps += 1;
     }
     
     fn update_bogo(&mut self) {
-        // Bogo sort just randomly shuffles until it gets lucky
-        // We'll check if it's sorted, and if not, shuffle again
         let mut is_sorted = true;
         for i in 1..self.array.len() {
-            self.accesses += 2; // Reading two elements
+            self.accesses += 2;
             if self.array[i-1] > self.array[i] {
                 is_sorted = false;
                 break;
@@ -137,13 +124,9 @@ impl SortVisualizer {
         if is_sorted {
             self.state = SortState::Completed;
         } else {
-            // Shuffle the array
-            let mut rng = rand::thread_rng();
-            for i in 0..self.array.len() {
-                let j = rng.gen_range(0..self.array.len());
-                self.array.swap(i, j);
-                self.accesses += 4; // Reading and writing two elements
-            }
+            let mut rng = thread_rng();
+            self.array.shuffle(&mut rng);
+            self.accesses += self.array.len() * 2;
         }
     }
     
@@ -237,116 +220,60 @@ impl SortVisualizer {
            horizontal: bool, x_offset: usize, buffer_width: u32) {
         let n = self.array.len();
         
-        // Create a gradient from red to green based on sort completion
         let sorted_percent = self.get_sorted_percent();
         let r = ((1.0 - sorted_percent) * 255.0) as u8;
         let g = (sorted_percent * 255.0) as u8;
-        let b = 50; // Add some blue for visual interest
+        let b = 50;
         
         if horizontal {
-            // Horizontal visualization (left to right)
             let bar_width = width as f32 / n as f32;
             
             for i in 0..n {
-                let bar_height = (self.array[i] as f32 / 255.0) * height as f32;
-                let bar_x = x + (i as f32 * bar_width) as usize;
-                let bar_y = y + height - bar_height as usize;
+                let bar_height = (self.array[i] as f32 / 255.0 * height as f32) as usize;
                 
-                // Highlight current indices being compared
-                let color = if (self.state == SortState::Running && 
-                               ((self.algorithm == SortAlgorithm::Bubble && (i == self.i || i == self.i + 1)) || 
-                                (self.algorithm == SortAlgorithm::Quick && i == self.pivot))) {
-                    [255, 255, 0, 255] // Yellow for current indices
+                let color = if self.state == SortState::Running &&
+                               ((self.algorithm == SortAlgorithm::Bubble && (i == self.i || i == self.i + 1)) ||
+                                (self.algorithm == SortAlgorithm::Quick && i == self.pivot)) {
+                    [255, 255, 0]
                 } else {
-                    [r, g, b, 255]
+                    [r, g, b]
                 };
                 
-                // Draw the bar
-                for dy in 0..bar_height as usize {
-                    for dx in 0..bar_width as usize {
-                        let px = bar_x + dx;
-                        let py = bar_y + dy;
-                        
-                        // Check bounds
-                        if px < x + width && py < y + height {
-                            let idx = 4 * (py * buffer_width as usize + (px + x_offset));
-                            if idx + 3 < frame.len() {
-                                frame[idx] = color[0];
-                                frame[idx + 1] = color[1];
-                                frame[idx + 2] = color[2];
-                                frame[idx + 3] = color[3];
-                            }
+                for j in 0..bar_height {
+                    for k in 0..(bar_width as usize) {
+                        let mut current_height = height as u32;
+                        if let Some(mon_h) = unsafe { MONITOR_HEIGHT } {
+                            current_height = mon_h;
                         }
+
+                        put_pixel_safe(frame, (x + (i as f32 * bar_width) as usize + k) as i32, (y + height - j - 1) as i32, buffer_width, current_height, [color[0], color[1], color[2], 255], x_offset);
                     }
                 }
             }
         } else {
-            // Vertical visualization (top to bottom)
             let bar_height = height as f32 / n as f32;
             
             for i in 0..n {
-                let bar_width = (self.array[i] as f32 / 255.0) * width as f32;
-                let bar_x = x;
-                let bar_y = y + (i as f32 * bar_height) as usize;
+                let bar_width = (self.array[i] as f32 / 255.0 * width as f32) as usize;
                 
-                // Highlight current indices being compared
-                let color = if (self.state == SortState::Running && 
-                               ((self.algorithm == SortAlgorithm::Bubble && (i == self.i || i == self.i + 1)) || 
-                                (self.algorithm == SortAlgorithm::Quick && i == self.pivot))) {
-                    [255, 255, 0, 255] // Yellow for current indices
+                let color = if self.state == SortState::Running &&
+                               ((self.algorithm == SortAlgorithm::Bubble && (i == self.i || i == self.i + 1)) ||
+                                (self.algorithm == SortAlgorithm::Quick && i == self.pivot)) {
+                    [255, 255, 0]
                 } else {
-                    [r, g, b, 255]
+                    [r, g, b]
                 };
                 
-                // Draw the bar
-                for dy in 0..bar_height as usize {
-                    for dx in 0..bar_width as usize {
-                        let px = bar_x + dx;
-                        let py = bar_y + dy;
-                        
-                        // Check bounds
-                        if px < x + width && py < y + height {
-                            let idx = 4 * (py * buffer_width as usize + (px + x_offset));
-                            if idx + 3 < frame.len() {
-                                frame[idx] = color[0];
-                                frame[idx + 1] = color[1];
-                                frame[idx + 2] = color[2];
-                                frame[idx + 3] = color[3];
-                            }
+                for j in 0..bar_width {
+                    for k in 0..(bar_height as usize) {
+                         let mut current_height = height as u32;
+                        if let Some(mon_h) = unsafe { MONITOR_HEIGHT } {
+                            current_height = mon_h;
                         }
+                        put_pixel_safe(frame, (x + j) as i32, (y + (i as f32 * bar_height) as usize + k) as i32, buffer_width, current_height, [color[0], color[1], color[2], 255], x_offset);
                     }
                 }
             }
-        }
-        
-        // Draw algorithm name and stats
-        let algo_name = match self.algorithm {
-            SortAlgorithm::Bogo => "Bogo Sort",
-            SortAlgorithm::Bubble => "Bubble Sort",
-            SortAlgorithm::Quick => "Quick Sort",
-        };
-        
-        let status = match self.state {
-            SortState::Running => "Running",
-            SortState::Completed => "Completed",
-            SortState::Restarting => "Restarting",
-        };
-        
-        // Draw algorithm name
-        if horizontal {
-            draw_text(frame, x as i32, (y - 20) as i32, algo_name, &[255, 255, 255], x_offset, buffer_width, 1.0);
-            
-            // Draw stats
-            let stats = format!("Steps: {} | Comparisons: {} | Accesses: {} | {}", 
-                              self.steps, self.comparisons, self.accesses, status);
-            draw_text(frame, x as i32, (y - 10) as i32, &stats, &[200, 200, 200], x_offset, buffer_width, 0.8);
-        } else {
-            draw_text(frame, (x + width + 5) as i32, y as i32, algo_name, &[255, 255, 255], x_offset, buffer_width, 1.0);
-            
-            // Draw stats
-            let stats = format!("Steps: {} | Comparisons: {} | Status: {}", 
-                              self.steps, self.comparisons, status);
-            draw_text(frame, (x + width + 5) as i32, (y + 10) as i32, &stats, &[200, 200, 200], x_offset, buffer_width, 0.8);
         }
     }
     
@@ -462,49 +389,20 @@ impl AudioVisualizer {
     }
     
     fn draw(&self, frame: &mut [u8], width: u32, height: u32, x_offset: usize, buffer_width: u32) {
-        let bar_width = (width as f32 / AUDIO_VIZ_BARS as f32).floor() as usize;
-        let margin = (width as usize - bar_width * AUDIO_VIZ_BARS) / 2;
-        let y_baseline = height as usize - 10; // 10 pixels from bottom
+        let bar_width = width as usize / AUDIO_VIZ_BARS;
+        let y_baseline = height as usize - 50;
+        
+        let time = 0.1;
         
         for i in 0..AUDIO_VIZ_BARS {
-            // Convert to usize and ensure it doesn't exceed the baseline
-            let bar_height = (self.current_heights[i] as usize).min(y_baseline);
-            if bar_height == 0 {
-                continue;
-            }
+            let bar_height = (self.current_heights[i] * (height as f32 / 200.0)).max(AUDIO_VIZ_MIN_HEIGHT) as usize;
+            let x_start = i * bar_width;
             
-            // Calculate color based on frequency (position) and height
-            let hue = (i as f32 / AUDIO_VIZ_BARS as f32) * 270.0; // Blue to pink spectrum
-            let saturation = 0.8;
-            let value = 0.7 + 0.3 * (self.spectrum[i]);
-            let color = hsv_to_rgb(hue, saturation, value);
+            let mut rng = thread_rng();
+            let noise = rng.gen_range(0.0..0.2);
+            let hue = (i as f32 / AUDIO_VIZ_BARS as f32 + time * 0.1 + noise) % 1.0;
+            let color = hsv_to_rgb(hue, 0.9, 1.0);
             
-            // Add alpha for neon effect
-            let color_rgba = [color[0], color[1], color[2], 220];
-            
-            // Draw the bar
-            let x_start = margin + i * bar_width;
-            for y in 0..bar_height {
-                for x in 0..bar_width {
-                    let x_pos = x_start + x;
-                    let y_pos = y_baseline - y;
-                    
-                    if x_pos < width as usize && y_pos < height as usize {
-                        // Add glow effect - brighter in the middle of each bar
-                        let glow_factor = 1.0 - (x as f32 / bar_width as f32 - 0.5).abs() * 2.0;
-                        let glow_color = [
-                            (color_rgba[0] as f32 * (0.7 + 0.3 * glow_factor)) as u8,
-                            (color_rgba[1] as f32 * (0.7 + 0.3 * glow_factor)) as u8,
-                            (color_rgba[2] as f32 * (0.7 + 0.3 * glow_factor)) as u8,
-                            color_rgba[3]
-                        ];
-                        
-                        put_pixel(frame, width, height, x_pos as i32, y_pos as i32, &glow_color, x_offset, buffer_width);
-                    }
-                }
-            }
-            
-            // Draw the neon glow outline
             self.draw_glow(frame, width, height, x_start, y_baseline, bar_width, bar_height, &color, x_offset, buffer_width);
         }
     }
@@ -592,23 +490,9 @@ impl Iterator for NoiseSource {
     
     fn next(&mut self) -> Option<f32> {
         self.position += 1;
-        
-        // Generate white noise
-        let noise = rand::thread_rng().gen_range(-1.0..1.0) * self.amplitude;
-        
-        // Apply some simple filtering to make it more interesting
-        // Pulsating effect based on position
-        let pulse_freq = 0.5; // Hz
-        let pulse = (self.position as f32 / self.sample_rate as f32 * pulse_freq * std::f32::consts::PI * 2.0).sin() * 0.5 + 0.5;
-        
-        // Low frequency oscillation for bass thumps
-        let lfo_freq = 0.8; // Hz
-        let lfo = (self.position as f32 / self.sample_rate as f32 * lfo_freq * std::f32::consts::PI * 2.0).sin() * 0.5 + 0.5;
-        
-        // Combine noise with pulse and lfo
-        let sample = noise * (0.5 + pulse * 0.5) * (0.7 + lfo * 0.3);
-        
-        Some(sample)
+        let mut rng = rand::thread_rng();
+        let noise = rng.gen_range(-1.0..1.0) * self.amplitude;
+        Some(noise)
     }
 }
 
@@ -799,9 +683,9 @@ struct TextFragment {
     x: i32,
     y: i32,
     color: [u8; 3],
-    scale: f32,
     life: f32,
     max_life: f32,
+    scale: f32,
 }
 
 // Static storage for text fragments
@@ -815,6 +699,22 @@ static mut AUDIO_THREAD_STARTED: bool = false;
 // Store information about the monitor
 static mut MONITOR_WIDTH: Option<u32> = None;
 static mut MONITOR_HEIGHT: Option<u32> = None;
+
+// Load the font once and store it
+static FONT: Lazy<FontArc> = Lazy::new(|| {
+    let source = SystemSource::new();
+    let handle = source
+        .select_best_match(&[font_kit::family_name::FamilyName::Monospace], &Properties::new())
+        .expect("Failed to find a monospace font");
+
+    match handle.load() {
+        Ok(font) => {
+            let font_data = font.copy_font_data().expect("Failed to get font data");
+            FontArc::try_from_vec(font_data.to_vec()).expect("Failed to convert font to FontArc")
+        },
+        Err(_) => panic!("Failed to load font"),
+    }
+});
 
 // Function to get screen dimensions from monitor
 pub fn set_monitor_dimensions(monitor: &MonitorHandle) {
@@ -882,7 +782,8 @@ pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset
                 add_random_text_fragment(width, height, time);
                 
                 // Schedule next fragment - more frequent appearance (0.2-1.0 seconds)
-                let delay = rand::thread_rng().gen_range(0.2..1.0);
+                let mut rng = rand::thread_rng();
+                let delay = rng.gen_range(0.2..1.0);
                 NEXT_FRAGMENT_TIME = Some(time + delay);
             }
         }
@@ -1168,23 +1069,19 @@ pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset
         }
         
         // Update and draw text fragments
-        if let Some(fragments) = TEXT_FRAGMENTS.as_mut() {
-            // Update each fragment's lifetime
-            fragments.retain_mut(|fragment| {
-                fragment.life -= 0.016; // Assume 60 FPS
-                fragment.life > 0.0
+        if let Some(ref mut fragments) = TEXT_FRAGMENTS {
+            // Update fragment lifetimes
+            fragments.retain_mut(|f| {
+                f.life -= 1.0 / 60.0; // Assuming 60 FPS
+                f.life > 0.0
             });
-            
-            // Draw all remaining fragments
+
+            // Add new fragments
+            add_random_text_fragment(width, height, time);
+
+            // Draw fragments
             for fragment in fragments.iter() {
                 draw_text_fragment(frame, width, height, fragment, x_offset, buffer_width);
-            }
-            
-            // Limit the number of fragments based on time (increasing over time)
-            let max_fragments = ((time * 0.1).min(5.0) + 10.0) as usize;
-            if fragments.len() > max_fragments {
-                fragments.sort_by(|a, b| a.life.partial_cmp(&b.life).unwrap());
-                fragments.truncate(max_fragments);
             }
         }
     }
@@ -1406,216 +1303,94 @@ fn draw_shadow_glow(frame: &mut [u8], width: u32, height: u32,
                    center_x: i32, center_y: i32, 
                    radius: i32, color: &[u8; 4],
                    x_offset: usize, buffer_width: u32) {
+    let radius_sq = radius * radius;
+    let inner_radius_sq = (radius - 5).max(0) * (radius - 5).max(0); // Soft inner edge
     
-    for y in -radius..=radius {
-        for x in -radius..=radius {
-            let dist_sq = x * x + y * y;
-            if dist_sq <= radius * radius {
+    // Define the bounding box of the glow
+    let x_min = (center_x - radius).max(0);
+    let x_max = (center_x + radius).min(width as i32 - 1);
+    let y_min = (center_y - radius).max(0);
+    let y_max = (center_y + radius).min(height as i32 - 1);
+    
+    for y in y_min..=y_max {
+        for x in x_min..=x_max {
+            let dx = x - center_x;
+            let dy = y - center_y;
+            let dist_sq = dx * dx + dy * dy;
+
+            if dist_sq < radius_sq {
                 // Calculate intensity based on distance from center
-                let intensity = 1.0 - (dist_sq as f32 / (radius * radius) as f32).sqrt();
+                let intensity = if dist_sq > inner_radius_sq {
+                    // Fade out from inner to outer radius
+                    1.0 - (dist_sq as f32 - inner_radius_sq as f32) / (radius_sq as f32 - inner_radius_sq as f32)
+                } else {
+                    1.0
+                };
                 
-                // Apply fading effect
-                let alpha = (intensity * color[3] as f32) as u8;
+                // Mix with a darker version for shadow effect
+                let shadow_color = [
+                    (color[0] as f32 * 0.5) as u8,
+                    (color[1] as f32 * 0.5) as u8,
+                    (color[2] as f32 * 0.5) as u8,
+                    (color[3] as f32 * intensity) as u8
+                ];
                 
-                // Only draw if visible
-                if alpha > 5 {
-                    let px = center_x + x;
-                    let py = center_y + y;
+                // Blend with existing pixels for a softer glow
+                let idx = 4 * (y as usize * buffer_width as usize + (x as usize + x_offset));
+                if idx + 3 < frame.len() {
+                    let existing_r = frame[idx];
+                    let existing_g = frame[idx + 1];
+                    let existing_b = frame[idx + 2];
                     
-                    let shadow_color = [color[0], color[1], color[2], alpha];
-                    put_pixel(frame, width, height, px, py, &shadow_color, x_offset, buffer_width);
+                    frame[idx] = existing_r.saturating_add(shadow_color[0]);
+                    frame[idx + 1] = existing_g.saturating_add(shadow_color[1]);
+                    frame[idx + 2] = existing_b.saturating_add(shadow_color[2]);
+                    frame[idx + 3] = 255;
                 }
             }
         }
-    }
-}
-
-// Function to draw text on the frame
-fn draw_text(frame: &mut [u8], x: i32, y: i32, text: &str, color: &[u8; 3], 
-            x_offset: usize, buffer_width: u32, scale: f32) {
-    // Very simple 5x7 pixel font for ASCII characters
-    let char_width = (6.0 * scale) as i32;
-    let char_height = (8.0 * scale) as i32;
-    
-    for (i, c) in text.chars().enumerate() {
-        let char_x = x + (i as i32 * char_width);
-        
-        // Skip non-printable or extended ASCII
-        if c < ' ' || c > '~' {
-            continue;
-        }
-        
-        // Draw a scaled character
-        for cy in 0..char_height {
-            for cx in 0..char_width-1 {
-                // Map scaled coordinates back to original font
-                let font_x = (cx as f32 / scale) as i32;
-                let font_y = (cy as f32 / scale) as i32;
-                
-                // Only draw character pixels, not the background
-                if font_x < 6 && font_y < 8 && is_font_pixel_set(c, font_x, font_y) {
-                    let px = char_x + cx;
-                    let py = y + cy;
-                    
-                    if px >= 0 && px < buffer_width as i32 && py >= 0 && py < (buffer_width / 4) as i32 {
-                        let idx = 4 * (py as usize * buffer_width as usize + (px as usize + x_offset));
-                        if idx + 3 < frame.len() {
-                            frame[idx] = color[0];
-                            frame[idx + 1] = color[1];
-                            frame[idx + 2] = color[2];
-                            frame[idx + 3] = 255;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Check if a pixel should be set for a given character and position
-fn is_font_pixel_set(c: char, x: i32, y: i32) -> bool {
-    // For simplicity, we'll just use a hardcoded implementation for a few characters
-    // In a real implementation, you'd use a font bitmap or similar
-    
-    // Space character
-    if c == ' ' {
-        return false;
-    }
-    
-    // Basic letters (simplistic representation)
-    if c.is_alphabetic() {
-        // Draw vertical line for most letters
-        if x == 0 {
-            return true;
-        }
-        
-        // Draw horizontal line at top and bottom for many letters
-        if (y == 0 || y == 6) && x > 0 && x < 4 {
-            return true;
-        }
-        
-        // Special case for some letters
-        match c.to_ascii_lowercase() {
-            'o' | 'c' | 'e' => return (x == 3 && y > 0 && y < 6) || (y == 0 || y == 6) && x > 0 && x < 3,
-            's' => return (y == 0 || y == 3 || y == 6) && x > 0 && x < 4 || 
-                          (y == 1 || y == 2) && x == 0 || 
-                          (y == 4 || y == 5) && x == 3,
-            'i' => return x == 2,
-            't' => return x == 2 || (y == 0 && x > 0 && x < 4),
-            _ => return (x == 0) || (x == 3 && y > 0 && y < 6) || (y == 0 || y == 6) && x > 0 && x < 3,
-        }
-    }
-    
-    // Numbers (very basic)
-    if c.is_numeric() {
-        // Draw box for numbers
-        return x == 0 || x == 3 || y == 0 || y == 6;
-    }
-    
-    // Simple symbols
-    match c {
-        '-' => return y == 3 && x > 0 && x < 4,
-        '.' | ',' => return x == 1 && y >= 5,
-        ':' => return x == 1 && (y == 2 || y == 5),
-        '/' => return (x == 0 && y >= 4) || (x == 1 && y >= 2 && y < 4) || (x == 2 && y >= 0 && y < 2),
-        _ => return x % 2 == 0 && y % 2 == 0, // Default pattern for other chars
     }
 }
 
 // Add a new random text fragment
-fn add_random_text_fragment(width: u32, height: u32, time: f32) {
-    unsafe {
-        if let Some(ref mut fragments) = TEXT_FRAGMENTS {
-            let mut rng = rand::thread_rng();
-            
-            // Pick a random segment from the Wikipedia text
-            let wiki_text = WIKIPEDIA_TEXT;
-            
-            // Vary segment length more dramatically
-            let segment_style = rng.gen_range(0..5);
-            let segment_length = match segment_style {
-                0 => rng.gen_range(3..10),      // Very short phrases
-                1 => rng.gen_range(10..25),     // Short phrases
-                2 => rng.gen_range(25..50),     // Medium phrases
-                3 => rng.gen_range(50..100),    // Long sentences
-                _ => rng.gen_range(5..30),      // Default range
-            };
-            
-            if wiki_text.len() > segment_length {
-                let start_pos = rng.gen_range(0..wiki_text.len() - segment_length);
-                let end_pos = start_pos + segment_length;
-                
-                // Find word boundaries if possible
-                let mut adjusted_start = start_pos;
-                while adjusted_start > 0 && !wiki_text.as_bytes()[adjusted_start].is_ascii_whitespace() {
-                    adjusted_start -= 1;
+fn add_random_text_fragment(width: u32, height: u32, _time: f32) {
+    static WIKIPEDIA_TEXT: Lazy<String> = Lazy::new(|| {
+        std::fs::read_to_string("src/resources/wikipedia_text.txt")
+            .unwrap_or_else(|_| "Failed to load wikipedia text.".to_string())
+    });
+
+    let mut rng = rand::thread_rng();
+
+    if rng.gen::<f64>() < 0.1 {
+        unsafe {
+            if let Some(fragments) = TEXT_FRAGMENTS.as_mut() {
+                if fragments.len() > 50 {
+                    return;
                 }
-                
-                let mut adjusted_end = end_pos;
-                while adjusted_end < wiki_text.len() && !wiki_text.as_bytes()[adjusted_end].is_ascii_whitespace() {
-                    adjusted_end += 1;
-                }
-                
-                // Extract text segment
-                let segment = wiki_text[adjusted_start..adjusted_end].trim().to_string();
-                
-                if !segment.is_empty() {
-                    // Positioning style
-                    let position_style = rng.gen_range(0..5);
-                    let (x, y) = match position_style {
-                        0 => (rng.gen_range(0..width as i32), rng.gen_range(0..height as i32)), // Random
-                        1 => (width as i32 / 2, rng.gen_range(0..height as i32)),  // Center horizontal
-                        2 => (rng.gen_range(0..width as i32), height as i32 / 2),  // Center vertical
-                        3 => (rng.gen_range(0..width as i32/4), rng.gen_range(0..height as i32)), // Left side
-                        _ => (width as i32 - rng.gen_range(0..width as i32/4), rng.gen_range(0..height as i32)), // Right side
-                    };
-                    
-                    // Choose color style
-                    let color_style = rng.gen_range(0..5);
-                    let color = match color_style {
-                        0 => [255, 255, 255], // White
-                        1 => [255, 255, 0],   // Yellow
-                        2 => [0, 255, 0],     // Green
-                        3 => [0, 255, 255],   // Cyan
-                        _ => [               // Random light color
-                            rng.gen_range(180..255),
-                            rng.gen_range(180..255),
-                            rng.gen_range(180..255),
-                        ],
-                    };
-                    
-                    // Vary scale more dramatically
-                    let scale_style = rng.gen_range(0..5);
-                    let scale = match scale_style {
-                        0 => rng.gen_range(0.5..0.7),   // Small text
-                        1 => rng.gen_range(0.7..0.9),   // Medium-small text
-                        2 => rng.gen_range(0.9..1.1),   // Normal text
-                        3 => rng.gen_range(1.1..1.5),   // Large text
-                        _ => rng.gen_range(1.5..2.5),   // Very large text
-                    };
-                    
-                    // Random lifetime (2-10 seconds)
-                    let lifetime = rng.gen_range(2.0..10.0);
-                    
+
+                let segment_length = rng.gen_range(20..80);
+                if WIKIPEDIA_TEXT.len() > segment_length {
+                    let start_pos = rng.gen_range(0..WIKIPEDIA_TEXT.len() - segment_length);
+                    let text = WIKIPEDIA_TEXT[start_pos..start_pos + segment_length]
+                        .trim()
+                        .to_string();
+
+                    let x = rng.gen_range(0..width as i32);
+                    let y = rng.gen_range(0..height as i32);
+
+                    let scale = rng.gen_range(20.0..40.0);
+                    let color = hsv_to_rgb(rng.gen_range(0.0..1.0), 0.8, 1.0);
+                    let lifetime = rng.gen_range(5.0..15.0);
+
                     fragments.push(TextFragment {
-                        text: segment,
+                        text,
                         x,
                         y,
                         color,
-                        scale,
                         life: lifetime,
                         max_life: lifetime,
+                        scale,
                     });
-                    
-                    // Use time for dynamic fragment limits - more fragments during certain periods
-                    let time_cycle = (time * 0.1).sin() * 0.5 + 0.5; // 0.0 to 1.0 cycle
-                    let max_fragments = 10 + (time_cycle * 20.0) as usize; // 10 to 30 fragments
-                    
-                    // Limit the number of fragments to prevent overdrawing
-                    if fragments.len() > max_fragments {
-                        fragments.sort_by(|a, b| a.life.partial_cmp(&b.life).unwrap());
-                        fragments.remove(0); // Remove the fragment with the shortest remaining life
-                    }
                 }
             }
         }
@@ -1623,30 +1398,101 @@ fn add_random_text_fragment(width: u32, height: u32, time: f32) {
 }
 
 // Draw a text fragment with fading effect
-fn draw_text_fragment(frame: &mut [u8], _width: u32, _height: u32, fragment: &TextFragment, 
-                     x_offset: usize, buffer_width: u32) {
-    // Calculate opacity based on lifetime - fade in and out
-    let fade_time = fragment.max_life * 0.2; // 20% of lifetime for fade in/out
-    let opacity = if fragment.life > fragment.max_life - fade_time {
-        // Fade in
-        (fragment.max_life - fragment.life) / fade_time
-    } else if fragment.life < fade_time {
-        // Fade out
-        fragment.life / fade_time
-    } else {
-        // Full opacity in the middle
-        1.0
-    };
+fn draw_text_fragment(
+    frame: &mut [u8],
+    _width: u32,
+    height: u32,
+    fragment: &TextFragment,
+    x_offset: usize,
+    buffer_width: u32,
+) {
+    let alpha = (fragment.life / fragment.max_life * 255.0) as u8;
+    let color = [fragment.color[0], fragment.color[1], fragment.color[2], alpha];
+
+    // Use ab_glyph to draw the text
+    let scale = PxScale::from(fragment.scale);
+    let glyphs = layout_paragraph(&FONT, scale, fragment.text.as_str());
+
+    for glyph in glyphs {
+        if let Some(outlined) = FONT.outline_glyph(glyph) {
+            let bounds = outlined.px_bounds();
+            outlined.draw(|px, py, v| {
+                let gx = px as i32 + bounds.min.x as i32;
+                let gy = py as i32 + bounds.min.y as i32;
+
+                let pixel_x = fragment.x + gx;
+                let pixel_y = fragment.y + gy;
+
+                let final_alpha = (v * (alpha as f32 / 255.0) * 255.0) as u8;
+
+                put_pixel_safe(
+                    frame,
+                    pixel_x,
+                    pixel_y,
+                    buffer_width,
+                    height,
+                    [color[0], color[1], color[2], final_alpha],
+                    x_offset,
+                );
+            });
+        }
+    }
+}
+
+fn layout_paragraph(font: &FontArc, scale: PxScale, text: &str) -> Vec<Glyph> {
+    let mut glyphs = Vec::new();
+    let mut x = 0.0;
+    let mut y = 0.0;
     
-    // Apply opacity to color
-    let color = [
-        (fragment.color[0] as f32 * opacity) as u8,
-        (fragment.color[1] as f32 * opacity) as u8,
-        (fragment.color[2] as f32 * opacity) as u8,
-    ];
+    for c in text.chars() {
+        if c == '\n' {
+            x = 0.0;
+            y += scale.y;
+            continue;
+        }
+        
+        let glyph_id = font.glyph_id(c);
+        let mut positioned = glyph_id.with_scale(scale);
+        positioned.position = ab_glyph::point(x, y);
+        glyphs.push(positioned);
+        x += font.h_advance_unscaled(glyph_id) * scale.x;
+    }
     
-    // Draw the text
-    draw_text(frame, fragment.x, fragment.y, &fragment.text, &color, x_offset, buffer_width, fragment.scale);
+    glyphs
+}
+
+// In the put_pixel_safe function, add blending for smoother text
+fn put_pixel_safe(
+    frame: &mut [u8],
+    x: i32,
+    y: i32,
+    buffer_width: u32,
+    buffer_height: u32,
+    color: [u8; 4],
+    x_offset: usize,
+) {
+    if x >= 0 && x < buffer_width as i32 && y >= 0 && y < buffer_height as i32 {
+        let x_global = x as usize + x_offset;
+        let y_global = y as usize;
+
+        let idx = 4 * (y_global * buffer_width as usize + x_global);
+        if idx + 3 < frame.len() {
+            // Simple alpha blending
+            let bg_r = frame[idx] as f32;
+            let bg_g = frame[idx + 1] as f32;
+            let bg_b = frame[idx + 2] as f32;
+
+            let fg_r = color[0] as f32;
+            let fg_g = color[1] as f32;
+            let fg_b = color[2] as f32;
+            let fg_a = color[3] as f32 / 255.0;
+
+            frame[idx] = ((fg_r * fg_a) + (bg_r * (1.0 - fg_a))) as u8;
+            frame[idx + 1] = ((fg_g * fg_a) + (bg_g * (1.0 - fg_a))) as u8;
+            frame[idx + 2] = ((fg_b * fg_a) + (bg_b * (1.0 - fg_a))) as u8;
+            frame[idx + 3] = 255;
+        }
+    }
 }
 
 // Public function to restart all sorting visualizers

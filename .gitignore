@@ -2,6 +2,9 @@
 /target
 **/*.rs.bk
 
+# Also ignore target directory with trailing slash
+target/
+
 # Ignore executable files
 *.exe
 *.dll

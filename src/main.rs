@@ -1,10 +1,12 @@
 use pixels::{Error, Pixels, SurfaceTexture};
 use rand::Rng;
+use std::sync::Arc;
 use winit::{
 	dpi::LogicalSize,
-	event::{Event, Key},
-	event_loop::{ControlFlow, EventLoop},
-	window::WindowBuilder,
+	event::{MouseButton},
+	keyboard::KeyCode,
+	event_loop::EventLoop,
+	window::{Window, WindowBuilder},
 };
 use winit_input_helper::WinitInputHelper;
 use std::time::{Duration, Instant};
@@ -636,10 +638,10 @@ fn main() -> Result<(), Error> {
 }
 
 fn run_combined() -> Result<(), Error> {
-	let event_loop = EventLoop::new();
+	let event_loop = EventLoop::new().unwrap();
 	let mut input = WinitInputHelper::new();
 	
-	let window = {
+	let window = Arc::new({
 		let size = LogicalSize::new(WIDTH as f64, HEIGHT as f64);
 		WindowBuilder::new()
 			.with_title("Mesmerise - Combined Visualizations")
@@ -647,7 +649,7 @@ fn run_combined() -> Result<(), Error> {
 			.with_min_inner_size(size)
 			.build(&event_loop)
 			.unwrap()
-	};
+	});
 	
 	// Get the primary monitor and set its dimensions for scaling
 	if let Some(monitor) = window.primary_monitor() {
@@ -672,44 +674,44 @@ fn run_combined() -> Result<(), Error> {
 	// Set the window title to match the initial state
 	window.set_title("Mesmerise - Combined Visualizations");
 
-	event_loop.run(move |event, _, control_flow| {
-		// Force continuous updates
-		*control_flow = ControlFlow::Poll;
-		
+	// Create a clone of the window for the closure
+	let window_clone = Arc::clone(&window);
+
+	event_loop.run(move |event, window_target| {
 		// Handle input events
 		if input.update(&event) {
 			// Exit on escape or close
-			if input.key_pressed(Key::Escape) || input.close_requested() {
-				*control_flow = ControlFlow::Exit;
+			if input.key_pressed(KeyCode::Escape) || input.close_requested() {
+				window_target.exit();
 				return;
 			}
 			
 			// Toggle visual mode with space
-			if input.key_pressed(Key::Space) {
+			if input.key_pressed(KeyCode::Space) {
 				world.toggle_mode();
-				window.set_title(&format!("Mesmerise - Combined - {}", world.get_status()));
+				window_clone.set_title(&format!("Mesmerise - Combined - {}", world.get_status()));
 			}
 
 			// Toggle fullscreen with F11 key
-			if input.key_pressed(Key::F11) {
+			if input.key_pressed(KeyCode::F11) {
 				is_fullscreen = !is_fullscreen;
-				window.set_fullscreen(if is_fullscreen {
+				window_clone.set_fullscreen(if is_fullscreen {
 					Some(winit::window::Fullscreen::Borderless(None))
 				} else {
 					None
 				});
 				
 				// Update monitor dimensions when toggling fullscreen
-				if let Some(monitor) = window.primary_monitor() {
+				if let Some(monitor) = window_clone.primary_monitor() {
 					ray_pattern::set_monitor_dimensions(&monitor);
 				}
 			}
 			
 			// Toggle fullscreen with Alt+Enter
-			if (input.key_pressed(Key::Return) || input.key_pressed(Key::NumpadEnter)) && 
-			   (input.key_held(Key::LAlt) || input.key_held(Key::RAlt)) {
+			if (input.key_pressed(KeyCode::Enter) || input.key_pressed(KeyCode::NumpadEnter)) && 
+			   (input.key_held(KeyCode::AltLeft) || input.key_held(KeyCode::AltRight)) {
 				is_fullscreen = !is_fullscreen;
-				window.set_fullscreen(if is_fullscreen {
+				window_clone.set_fullscreen(if is_fullscreen {
 					Some(winit::window::Fullscreen::Borderless(None))
 				} else {
 					None
@@ -717,8 +719,8 @@ fn run_combined() -> Result<(), Error> {
 			}
 
 			// Update mouse position if it's within the window
-			if let Some(mouse_pos) = input.mouse() {
-				let window_size = window.inner_size();
+			if let Some(mouse_pos) = input.cursor() {
+				let window_size = window_clone.inner_size();
 				
 				// Only apply mouse interaction to the left side (original visualization)
 				if mouse_pos.0 < window_size.width as f32 / 2.0 {
@@ -732,10 +734,10 @@ fn run_combined() -> Result<(), Error> {
 			}
 			
 			// Track mouse button for interaction - only on the left side
-			if let Some(mouse_pos) = input.mouse() {
-				let window_size = window.inner_size();
+			if let Some(mouse_pos) = input.cursor() {
+				let window_size = window_clone.inner_size();
 				if mouse_pos.0 < window_size.width as f32 / 2.0 {
-					world.set_mouse_active(input.mouse_held(0)); // 0 = Left mouse button
+					world.set_mouse_active(input.mouse_held(MouseButton::Left)); // Left mouse button
 				} else {
 					world.set_mouse_active(false);
 				}
@@ -746,38 +748,38 @@ fn run_combined() -> Result<(), Error> {
 				let _ = pixels.resize_surface(size.width, size.height);
 				
 				// Update monitor dimensions when the window is resized
-				if let Some(monitor) = window.primary_monitor() {
+				if let Some(monitor) = window_clone.primary_monitor() {
 					ray_pattern::set_monitor_dimensions(&monitor);
 				}
 			}
 
 			// Add explosion on key press
-			if input.key_pressed(Key::E) {
+			if input.key_pressed(KeyCode::KeyE) {
 				let center_x = ORIGINAL_WIDTH as f32 / 2.0;
 				let center_y = HEIGHT as f32 / 2.0;
 				world.create_explosion(center_x, center_y, 200);
 			}
 
 			// Create explosion at mouse position when right clicking
-			if input.mouse_pressed(1) { // 1 = Right mouse button
+			if input.mouse_pressed(MouseButton::Right) {
 				if let Some((x, y)) = world.mouse_pos {
 					world.create_explosion(x, y, 100);
 				}
 			}
 
 			// Add/remove lines with + and - keys
-			if input.key_pressed(Key::Equals) || input.key_pressed(Key::Plus) {
+			if input.key_pressed(KeyCode::Equal) {
 				world.add_lines(10);
-				window.set_title(&format!("Mesmerise - Combined - {}", world.get_status()));
+				window_clone.set_title(&format!("Mesmerise - Combined - {}", world.get_status()));
 			}
 			
-			if input.key_pressed(Key::Minus) {
+			if input.key_pressed(KeyCode::Minus) {
 				world.remove_lines(10);
-				window.set_title(&format!("Mesmerise - Combined - {}", world.get_status()));
+				window_clone.set_title(&format!("Mesmerise - Combined - {}", world.get_status()));
 			}
 
 			// Add another special key for creating fireworks
-			if input.key_pressed(Key::F) {
+			if input.key_pressed(KeyCode::KeyF) {
 				// Create multiple explosions for a firework effect
 				for _ in 0..5 {
 					let x = world.rng.gen_range(0.0..ORIGINAL_WIDTH as f32);
@@ -787,26 +789,26 @@ fn run_combined() -> Result<(), Error> {
 			}
 			
 			// Toggle which side(s) are active
-			if input.key_pressed(Key::Key1) {
+			if input.key_pressed(KeyCode::Digit1) {
 				active_side = ActiveSide::Original; // Original only
-				window.set_title("Mesmerise - Original Visualization Only");
+				window_clone.set_title("Mesmerise - Original Visualization Only");
 			}
-			if input.key_pressed(Key::Key2) {
+			if input.key_pressed(KeyCode::Digit2) {
 				active_side = ActiveSide::Circular; // Circular only
-				window.set_title("Mesmerise - Circular Visualization Only");
+				window_clone.set_title("Mesmerise - Circular Visualization Only");
 			}
-			if input.key_pressed(Key::Key3) {
+			if input.key_pressed(KeyCode::Digit3) {
 				active_side = ActiveSide::Full; // Full screen with all visualizations
-				window.set_title("Mesmerise - Combined Visualizations");
+				window_clone.set_title("Mesmerise - Combined Visualizations");
 			}
-			if input.key_pressed(Key::Key4) {
+			if input.key_pressed(KeyCode::Digit4) {
 				active_side = ActiveSide::RayPattern; // Only ray pattern
-				window.set_title("Mesmerise - Ray Pattern - WASD/Arrows: Move Balls, Mouse: Teleport - With Sorting Visualizations");
+				window_clone.set_title("Mesmerise - Ray Pattern - WASD/Arrows: Move Balls, Mouse: Teleport - With Sorting Visualizations");
 				
 				// Make sure we're in fullscreen in ray pattern mode
 				if !is_fullscreen {
 					is_fullscreen = true;
-					window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+					window_clone.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
 				}
 			}
 
@@ -814,41 +816,41 @@ fn run_combined() -> Result<(), Error> {
 			if active_side == ActiveSide::RayPattern || active_side == ActiveSide::Full {
 				// Yellow ball controls (WASD)
 				let force = 0.5;
-				if input.key_held(Key::W) {
+				if input.key_held(KeyCode::KeyW) {
 					ray_pattern::apply_force_yellow(0.0, -force);
 				}
-				if input.key_held(Key::S) {
+				if input.key_held(KeyCode::KeyS) {
 					ray_pattern::apply_force_yellow(0.0, force);
 				}
-				if input.key_held(Key::A) {
+				if input.key_held(KeyCode::KeyA) {
 					ray_pattern::apply_force_yellow(-force, 0.0);
 				}
-				if input.key_held(Key::D) {
+				if input.key_held(KeyCode::KeyD) {
 					ray_pattern::apply_force_yellow(force, 0.0);
 				}
 				
 				// Green ball controls (arrow keys)
-				if input.key_held(Key::ArrowUp) {
+				if input.key_held(KeyCode::ArrowUp) {
 					ray_pattern::apply_force_green(0.0, -force);
 				}
-				if input.key_held(Key::ArrowDown) {
+				if input.key_held(KeyCode::ArrowDown) {
 					ray_pattern::apply_force_green(0.0, force);
 				}
-				if input.key_held(Key::ArrowLeft) {
+				if input.key_held(KeyCode::ArrowLeft) {
 					ray_pattern::apply_force_green(-force, 0.0);
 				}
-				if input.key_held(Key::ArrowRight) {
+				if input.key_held(KeyCode::ArrowRight) {
 					ray_pattern::apply_force_green(force, 0.0);
 				}
 				
 				// Press R to restart sorting visualizers
-				if input.key_pressed(Key::R) {
+				if input.key_pressed(KeyCode::KeyR) {
 					ray_pattern::restart_sorters();
 				}
 				
 				// Teleport balls to mouse position on click
-				if input.mouse_pressed(0) { // Left mouse button
-					if let Some(mouse_pos) = input.mouse() {
+				if input.mouse_pressed(MouseButton::Left) {
+					if let Some(mouse_pos) = input.cursor() {
 						let mouse_x = mouse_pos.0;
 						let mouse_y = mouse_pos.1;
 						
@@ -856,8 +858,8 @@ fn run_combined() -> Result<(), Error> {
 					}
 				}
 				
-				if input.mouse_pressed(1) { // Right mouse button
-					if let Some(mouse_pos) = input.mouse() {
+				if input.mouse_pressed(MouseButton::Right) {
+					if let Some(mouse_pos) = input.cursor() {
 						let mouse_x = mouse_pos.0;
 						let mouse_y = mouse_pos.1;
 						
@@ -871,15 +873,13 @@ fn run_combined() -> Result<(), Error> {
 		if last_frame.elapsed() >= target_frame_time {
 			world.update();
 			
-			if let Event::RedrawRequested(_) = event {
-				// Clear the frame
-				for pixel in pixels.frame_mut().chunks_exact_mut(4) {
-					// Default to black
-					pixel[0] = 0; // R
-					pixel[1] = 0; // G
-					pixel[2] = 0; // B
-					pixel[3] = 255; // A
-				}
+			// Clear the frame
+			for pixel in pixels.frame_mut().chunks_exact_mut(4) {
+				// Default to black
+				pixel[0] = 0; // R
+				pixel[1] = 0; // G
+				pixel[2] = 0; // B
+				pixel[3] = 255; // A
 			}
 			
 			// Draw the appropriate visualization based on active side
@@ -911,15 +911,17 @@ fn run_combined() -> Result<(), Error> {
 			// Render the current frame
 			if let Err(err) = pixels.render() {
 				eprintln!("Pixels render error: {err}");
-				*control_flow = ControlFlow::Exit;
+				window_target.exit();
 				return;
 			}
 			
 			// Request redraw
-			window.request_redraw();
+			window_clone.request_redraw();
 			last_frame = Instant::now();
 		}
-	})
+	}).unwrap();
+	
+	Ok(())
 }
 
 // Draw the original visualization on the left half of the screen

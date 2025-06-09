@@ -1,8 +1,8 @@
 use pixels::{Pixels, SurfaceTexture};
 use winit::{
     dpi::LogicalSize,
-    event::{Event, VirtualKeyCode},
-    event_loop::{ControlFlow, EventLoop},
+    keyboard::KeyCode,
+    event_loop::{EventLoop},
     window::WindowBuilder,
 };
 use winit_input_helper::WinitInputHelper;
@@ -14,7 +14,7 @@ pub const HEIGHT: u32 = 300;
 
 fn main() {
     // Set up window and input handling
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().unwrap();
     let mut input = WinitInputHelper::new();
 
     let window = WindowBuilder::new()
@@ -35,13 +35,12 @@ fn main() {
     let mut last_frame = Instant::now();
     let target_frame_time = Duration::from_secs_f32(1.0 / 60.0);
 
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
-
+    event_loop.run(move |event, window_target| {
+        // Default control flow is Poll
         if input.update(&event) {
             // Exit on Escape or window close
-            if input.key_pressed(VirtualKeyCode::Escape) || input.close_requested() {
-                *control_flow = ControlFlow::Exit;
+            if input.key_pressed(KeyCode::Escape) || input.close_requested() {
+                window_target.exit();
                 return;
             }
 
@@ -56,16 +55,16 @@ fn main() {
             let t = start_time.elapsed().as_secs_f32();
             draw_frame(pixels.frame_mut(), t);
             if pixels.render().is_err() {
-                *control_flow = ControlFlow::Exit;
+                window_target.exit();
                 return;
             }
             last_frame = Instant::now();
         }
-    });
+    }).unwrap(); // Unwrap the result of run
 }
 
 /// Composite drawing routine splits the buffer into three regions.
-fn draw_frame(frame: &mut [u8], t: f32) {
+pub fn draw_frame(frame: &mut [u8], t: f32) {
     let w = WIDTH as usize;
     let h = HEIGHT as usize;
     let region_width = w / 3;
@@ -89,7 +88,7 @@ fn draw_frame(frame: &mut [u8], t: f32) {
 }
 
 /// Region 0: concentric, rainbow‐colored circles
-fn draw_concentric_region(
+pub fn draw_concentric_region(
     frame: &mut [u8],
     x_off: usize,
     region_w: usize,
@@ -97,7 +96,7 @@ fn draw_concentric_region(
     h: usize,
     t: f32,
 ) {
-    let cy = h / 2;
+    let _cy = h / 2; // Marked as unused with underscore
     let radius = (region_w.min(h) as f32) * 0.45;
 
     for py in 0..h {
@@ -128,7 +127,7 @@ fn draw_concentric_region(
 }
 
 /// Region 1: a few dots orbiting in a circle
-fn draw_orbit_region(
+pub fn draw_orbit_region(
     frame: &mut [u8],
     x_off: usize,
     region_w: usize,
@@ -164,7 +163,7 @@ fn draw_orbit_region(
 }
 
 /// Region 2: radial white beams spinning slowly
-fn draw_beams_region(
+pub fn draw_beams_region(
     frame: &mut [u8],
     x_off: usize,
     region_w: usize,

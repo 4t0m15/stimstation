@@ -1,1 +1,12 @@
-/target/
+# Ignore build artifacts and temporary files
+/target
+**/*.rs.bk
+
+# Ignore executable files
+*.exe
+*.dll
+*.pdb
+
+# Ignore OS files
+.DS_Store
+Thumbs.db

@@ -23,28 +23,5 @@ image = { version = "0.25.6", optional = true }
 visual-proofs = ["plotters", "macroquad", "image"]
 default = []
 
-[[example]]
-name = "pythagoras_plot"
-required-features = ["plotters"]
-
-[[example]]
-name = "pythagoras_macroquad"
-required-features = ["macroquad"]
-
-# induction_egui is now moved to its own crate in the workspace
-
-[[example]]
-name = "simple_proof"
-# No dependencies needed for this example
-
-[[example]]
-name = "fibonacci_spiral"
-# No dependencies needed for this example
-
-[[example]]
-name = "ray_clock"
-required-features = ["macroquad"]
-
-[[example]]
-name = "ray_pattern"
-required-features = ["image"]
+# Examples have been integrated into the main application
+# and their files have been removed

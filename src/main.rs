@@ -27,7 +27,7 @@ const ORIGINAL_WIDTH: u32 = 800;
 const ORIGINAL_HEIGHT: u32 = 400;  // Reduced height for original
 
 // Flag to control which part of the visualization is active
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 enum ActiveSide {
 	Original,  // Original lines only
 	Circular,  // Circular only
@@ -513,56 +513,32 @@ fn draw_line(frame: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4
 	let sx = if x0 < x1 { 1 } else { -1 };
 	let sy = if y0 < y1 { 1 } else { -1 };
 	let mut err = dx - dy;
-
 	let mut x = x0;
 	let mut y = y0;
-	
-	// Extend glow radius beyond the line width
 	let glow_radius = width * 3;
-	
-	// Calculate height for safe pixel operations
 	let height = frame.len() / (4 * WIDTH as usize);
 	
-	// Early culling - check if the line is completely outside the viewport
 	if (x0 < 0 && x1 < 0) || (x0 >= WIDTH as i32 && x1 >= WIDTH as i32) ||
 	   (y0 < 0 && y1 < 0) || (y0 >= height as i32 && y1 >= height as i32) {
 		return;
 	}
 
 	while x >= 0 && x < WIDTH as i32 && y >= 0 && y < HEIGHT as i32 {
-		// Draw the glowing point with falloff
 		for w_y in -glow_radius..=glow_radius {
 			for w_x in -glow_radius..=glow_radius {
-				let px = x + w_x;
-				let py = y + w_y;
-				
-				// Calculate distance from line center
 				let distance_squared = w_x * w_x + w_y * w_y;
 				let distance = (distance_squared as f32).sqrt();
 				
-				// Skip if beyond glow radius
-				if distance > glow_radius as f32 {
-					continue;
-				}
+				if distance > glow_radius as f32 { continue; }
 				
-				// Calculate intensity based on distance
-				// Core of the line is solid, then fades out
 				let intensity = if distance <= width as f32 {
-					1.0 // Solid core
+					1.0
 				} else {
-					// Quadratic falloff for a smoother glow effect
 					let falloff = 1.0 - (distance - width as f32) / (glow_radius as f32 - width as f32);
-					falloff * falloff // Squared for more pronounced falloff
+					falloff * falloff
 				};
 				
-				// Use our safe blending function
-				blend_pixel_safe(
-					frame, 
-					px, py, 
-					WIDTH, HEIGHT as u32, 
-					color, 
-					intensity
-				);
+				blend_pixel_safe(frame, x + w_x, y + w_y, WIDTH, HEIGHT as u32, color, intensity);
 			}
 		}
 
@@ -577,8 +553,8 @@ fn draw_line(frame: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4
 // Helper function to draw a glowing point with improved safety
 fn draw_point(frame: &mut [u8], x: i32, y: i32, color: [u8; 4], size: i32) {
 	let glow_radius = size * 2;
+	let height = frame.len() / (4 * WIDTH as usize);
 	
-	// Early culling - skip if entirely off-screen
 	if x + glow_radius < 0 || x - glow_radius >= WIDTH as i32 || 
 	   y + glow_radius < 0 || y - glow_radius >= HEIGHT as i32 {
 		return;
@@ -586,38 +562,24 @@ fn draw_point(frame: &mut [u8], x: i32, y: i32, color: [u8; 4], size: i32) {
 	
 	for w_y in -glow_radius..=glow_radius {
 		for w_x in -glow_radius..=glow_radius {
-			// Calculate distance from center - use distance squared when possible
 			let distance_squared = w_x * w_x + w_y * w_y;
 			let distance = (distance_squared as f32).sqrt();
 			
-			// Skip if beyond glow radius
-			if distance > glow_radius as f32 {
-				continue;
-			}
+			if distance > glow_radius as f32 { continue; }
 			
-			// Calculate intensity based on distance
 			let intensity = if distance <= size as f32 {
-				1.0 // Solid core
+				1.0
 			} else {
-				// Quadratic falloff for a smoother glow effect
 				let falloff = 1.0 - (distance - size as f32) / (glow_radius as f32 - size as f32);
-				falloff * falloff // Squared for more pronounced falloff
+				falloff * falloff
 			};
 			
-			// Apply the color with calculated intensity and respect alpha
 			let alpha_factor = color[3] as f32 / 255.0;
 			let r = (intensity * color[0] as f32 * alpha_factor) as u8;
 			let g = (intensity * color[1] as f32 * alpha_factor) as u8;
 			let b = (intensity * color[2] as f32 * alpha_factor) as u8;
 			
-			// Use our safe blending function
-			blend_pixel_safe(
-				frame,
-				x + w_x, y + w_y,
-				WIDTH, HEIGHT as u32,
-				[r, g, b, color[3]],
-				1.0
-			);
+			blend_pixel_safe(frame, x + w_x, y + w_y, WIDTH, HEIGHT as u32, [r, g, b, color[3]], 1.0);
 		}
 	}
 }
@@ -666,12 +628,11 @@ fn blend_pixel_safe(frame: &mut [u8], x: i32, y: i32, width: u32, height: u32, c
             let r = (intensity * color[0] as f32) as u16;
             let g = (intensity * color[1] as f32) as u16;
             let b = (intensity * color[2] as f32) as u16;
-            let a = color[3];
             
             frame[idx] = (frame[idx] as u16 + r).min(255) as u8;
             frame[idx + 1] = (frame[idx + 1] as u16 + g).min(255) as u8;
             frame[idx + 2] = (frame[idx + 2] as u16 + b).min(255) as u8;
-            frame[idx + 3] = a;
+            frame[idx + 3] = color[3];
         }
     }
 }
@@ -694,7 +655,6 @@ fn run_combined() -> Result<(), Error> {
 			.unwrap()
 	});
 	
-	// Get the primary monitor and set its dimensions for scaling
 	if let Some(monitor) = window.primary_monitor() {
 		ray_pattern::set_monitor_dimensions(&monitor);
 	}
@@ -709,36 +669,25 @@ fn run_combined() -> Result<(), Error> {
 	let mut active_side = ActiveSide::Full;
 	let start_time = Instant::now();
 	let mut last_frame = Instant::now();
-	let target_frame_time = Duration::from_secs_f32(1.0 / 60.0); // 60 FPS target
-	
-	// Initialize FPS counter
+	let target_frame_time = Duration::from_secs_f32(1.0 / 60.0);
 	let mut fps_counter = FpsCounter::new();
-	
-	// Track fullscreen state
 	let mut is_fullscreen = false;
 
-	// Set the window title to match the initial state
 	window.set_title("Mesmerise - Combined Visualizations");
-
-	// Create a clone of the window for the closure
 	let window_clone = Arc::clone(&window);
 
 	event_loop.run(move |event, window_target| {
-		// Handle input events
 		if input.update(&event) {
-			// Exit on escape or close
 			if input.key_pressed(KeyCode::Escape) || input.close_requested() {
 				window_target.exit();
 				return;
 			}
 			
-			// Toggle visual mode with space
 			if input.key_pressed(KeyCode::Space) {
 				world.toggle_mode();
 				window_clone.set_title(&format!("Mesmerise - Combined - {}", world.get_status()));
 			}
 
-			// Toggle fullscreen with F11 key
 			if input.key_pressed(KeyCode::F11) {
 				is_fullscreen = !is_fullscreen;
 				window_clone.set_fullscreen(if is_fullscreen {
@@ -747,13 +696,11 @@ fn run_combined() -> Result<(), Error> {
 					None
 				});
 				
-				// Update monitor dimensions when toggling fullscreen
 				if let Some(monitor) = window_clone.primary_monitor() {
 					ray_pattern::set_monitor_dimensions(&monitor);
 				}
 			}
 			
-			// Toggle fullscreen with Alt+Enter
 			if (input.key_pressed(KeyCode::Enter) || input.key_pressed(KeyCode::NumpadEnter)) && 
 			   (input.key_held(KeyCode::AltLeft) || input.key_held(KeyCode::AltRight)) {
 				is_fullscreen = !is_fullscreen;
@@ -764,11 +711,9 @@ fn run_combined() -> Result<(), Error> {
 				});
 			}
 
-			// Update mouse position if it's within the window
 			if let Some(mouse_pos) = input.cursor() {
 				let window_size = window_clone.inner_size();
 				
-				// Only apply mouse interaction to the left side (original visualization)
 				if mouse_pos.0 < window_size.width as f32 / 2.0 {
 					let adjusted_x = mouse_pos.0;
 					let scale_x = ORIGINAL_WIDTH as f32 / (window_size.width as f32 / 2.0);
@@ -779,41 +724,35 @@ fn run_combined() -> Result<(), Error> {
 				}
 			}
 			
-			// Track mouse button for interaction - only on the left side
 			if let Some(mouse_pos) = input.cursor() {
 				let window_size = window_clone.inner_size();
 				if mouse_pos.0 < window_size.width as f32 / 2.0 {
-					world.set_mouse_active(input.mouse_held(MouseButton::Left)); // Left mouse button
+					world.set_mouse_active(input.mouse_held(MouseButton::Left));
 				} else {
 					world.set_mouse_active(false);
 				}
 			}
 
-			// Resize the window
 			if let Some(size) = input.window_resized() {
 				let _ = pixels.resize_surface(size.width, size.height);
 				
-				// Update monitor dimensions when the window is resized
 				if let Some(monitor) = window_clone.primary_monitor() {
 					ray_pattern::set_monitor_dimensions(&monitor);
 				}
 			}
 
-			// Add explosion on key press
 			if input.key_pressed(KeyCode::KeyE) {
 				let center_x = ORIGINAL_WIDTH as f32 / 2.0;
 				let center_y = HEIGHT as f32 / 2.0;
 				world.create_explosion(center_x, center_y, 200);
 			}
 
-			// Create explosion at mouse position when right clicking
 			if input.mouse_pressed(MouseButton::Right) {
 				if let Some((x, y)) = world.mouse_pos {
 					world.create_explosion(x, y, 100);
 				}
 			}
 
-			// Add/remove lines with + and - keys
 			if input.key_pressed(KeyCode::Equal) {
 				world.add_lines(10);
 				window_clone.set_title(&format!("Mesmerise - Combined - {}", world.get_status()));
@@ -824,174 +763,115 @@ fn run_combined() -> Result<(), Error> {
 				window_clone.set_title(&format!("Mesmerise - Combined - {}", world.get_status()));
 			}
 
-			// Add another special key for creating fireworks
 			if input.key_pressed(KeyCode::KeyF) {
-				// Create multiple explosions for a firework effect
 				for _ in 0..5 {
 					let x = world.rng.gen_range(0.0..ORIGINAL_WIDTH as f32);
-					let y = world.rng.gen_range(0.0..HEIGHT as f32 / 2.0); // Upper half of screen
+					let y = world.rng.gen_range(0.0..HEIGHT as f32 / 2.0);
 					world.create_explosion(x, y, 50);
 				}
 			}
 			
-			// Toggle which side(s) are active
-			if input.key_pressed(KeyCode::Digit1) {
-				active_side = ActiveSide::Original; // Original only
-				window_clone.set_title("Mesmerise - Original Visualization Only");
-			}
-			if input.key_pressed(KeyCode::Digit2) {
-				active_side = ActiveSide::Circular; // Circular only
-				window_clone.set_title("Mesmerise - Circular Visualization Only");
-			}
-			if input.key_pressed(KeyCode::Digit3) {
-				active_side = ActiveSide::Full; // Full screen with all visualizations
-				window_clone.set_title("Mesmerise - Combined Visualizations");
-			}
-			if input.key_pressed(KeyCode::Digit4) {
-				active_side = ActiveSide::RayPattern; // Only ray pattern
-				window_clone.set_title("Mesmerise - Ray Pattern - WASD/Arrows: Move Balls, Mouse: Teleport - With Sorting Visualizations");
-				
-				// Make sure we're in fullscreen in ray pattern mode
-				if !is_fullscreen {
-					is_fullscreen = true;
-					window_clone.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
-				}
-			}
-			if input.key_pressed(KeyCode::Digit5) {
-				active_side = ActiveSide::Pythagoras; // Only Pythagoras visualization
-				window_clone.set_title("Mesmerise - Pythagoras Theorem Visualization");
-			}
-			if input.key_pressed(KeyCode::Digit6) {
-				active_side = ActiveSide::FibonacciSpiral; // Only Fibonacci spiral
-				window_clone.set_title("Mesmerise - Fibonacci Spiral Visualization");
-			}
-			if input.key_pressed(KeyCode::Digit7) {
-				active_side = ActiveSide::SimpleProof; // Only simple proof
-				window_clone.set_title("Mesmerise - Simple Proof Visualization");
-			}
+			// View switching
+			active_side = match () {
+				_ if input.key_pressed(KeyCode::Digit1) => {
+					window_clone.set_title("Mesmerise - Original Visualization Only");
+					ActiveSide::Original
+				},
+				_ if input.key_pressed(KeyCode::Digit2) => {
+					window_clone.set_title("Mesmerise - Circular Visualization Only");
+					ActiveSide::Circular
+				},
+				_ if input.key_pressed(KeyCode::Digit3) => {
+					window_clone.set_title("Mesmerise - Combined Visualizations");
+					ActiveSide::Full
+				},
+				_ if input.key_pressed(KeyCode::Digit4) => {
+					window_clone.set_title("Mesmerise - Ray Pattern - WASD/Arrows: Move Balls, Mouse: Teleport - With Sorting Visualizations");
+					if !is_fullscreen {
+						is_fullscreen = true;
+						window_clone.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+					}
+					ActiveSide::RayPattern
+				},
+				_ if input.key_pressed(KeyCode::Digit5) => {
+					window_clone.set_title("Mesmerise - Pythagoras Theorem Visualization");
+					ActiveSide::Pythagoras
+				},
+				_ if input.key_pressed(KeyCode::Digit6) => {
+					window_clone.set_title("Mesmerise - Fibonacci Spiral Visualization");
+					ActiveSide::FibonacciSpiral
+				},
+				_ if input.key_pressed(KeyCode::Digit7) => {
+					window_clone.set_title("Mesmerise - Simple Proof Visualization");
+					ActiveSide::SimpleProof
+				},
+				_ => active_side,
+			};
 
-			// Apply force to balls in ray pattern when in RayPattern mode
+			// Ray pattern controls
 			if active_side == ActiveSide::RayPattern || active_side == ActiveSide::Full {
-				// Yellow ball controls (WASD)
 				let force = 0.5;
-				if input.key_held(KeyCode::KeyW) {
-					ray_pattern::apply_force_yellow(0.0, -force);
-				}
-				if input.key_held(KeyCode::KeyS) {
-					ray_pattern::apply_force_yellow(0.0, force);
-				}
-				if input.key_held(KeyCode::KeyA) {
-					ray_pattern::apply_force_yellow(-force, 0.0);
-				}
-				if input.key_held(KeyCode::KeyD) {
-					ray_pattern::apply_force_yellow(force, 0.0);
-				}
+				if input.key_held(KeyCode::KeyW) { ray_pattern::apply_force_yellow(0.0, -force); }
+				if input.key_held(KeyCode::KeyS) { ray_pattern::apply_force_yellow(0.0, force); }
+				if input.key_held(KeyCode::KeyA) { ray_pattern::apply_force_yellow(-force, 0.0); }
+				if input.key_held(KeyCode::KeyD) { ray_pattern::apply_force_yellow(force, 0.0); }
 				
-				// Green ball controls (arrow keys)
-				if input.key_held(KeyCode::ArrowUp) {
-					ray_pattern::apply_force_green(0.0, -force);
-				}
-				if input.key_held(KeyCode::ArrowDown) {
-					ray_pattern::apply_force_green(0.0, force);
-				}
-				if input.key_held(KeyCode::ArrowLeft) {
-					ray_pattern::apply_force_green(-force, 0.0);
-				}
-				if input.key_held(KeyCode::ArrowRight) {
-					ray_pattern::apply_force_green(force, 0.0);
-				}
+				if input.key_held(KeyCode::ArrowUp) { ray_pattern::apply_force_green(0.0, -force); }
+				if input.key_held(KeyCode::ArrowDown) { ray_pattern::apply_force_green(0.0, force); }
+				if input.key_held(KeyCode::ArrowLeft) { ray_pattern::apply_force_green(-force, 0.0); }
+				if input.key_held(KeyCode::ArrowRight) { ray_pattern::apply_force_green(force, 0.0); }
 				
-				// Press R to restart sorting visualizers
-				if input.key_pressed(KeyCode::KeyR) {
-					ray_pattern::restart_sorters();
-				}
+				if input.key_pressed(KeyCode::KeyR) { ray_pattern::restart_sorters(); }
 				
-				// Teleport balls to mouse position on click
 				if input.mouse_pressed(MouseButton::Left) {
 					if let Some(mouse_pos) = input.cursor() {
-						let mouse_x = mouse_pos.0;
-						let mouse_y = mouse_pos.1;
-						
-						ray_pattern::teleport_yellow(mouse_x, mouse_y);
+						ray_pattern::teleport_yellow(mouse_pos.0, mouse_pos.1);
 					}
 				}
 				
 				if input.mouse_pressed(MouseButton::Right) {
 					if let Some(mouse_pos) = input.cursor() {
-						let mouse_x = mouse_pos.0;
-						let mouse_y = mouse_pos.1;
-						
-						ray_pattern::teleport_green(mouse_x, mouse_y);
+						ray_pattern::teleport_green(mouse_pos.0, mouse_pos.1);
 					}
 				}
 			}
 		}
 
-		// Separate rendering logic from input handling
 		match event {
 			winit::event::Event::WindowEvent { 
 				event: winit::event::WindowEvent::RedrawRequested, 
 				.. 
 			} => {
-				// Only update and render if enough time has passed since the last frame
 				if last_frame.elapsed() >= target_frame_time {
 					world.update();
 					
-					// Clear the frame
 					for pixel in pixels.frame_mut().chunks_exact_mut(4) {
-						// Default to black
-						pixel[0] = 0; // R
-						pixel[1] = 0; // G
-						pixel[2] = 0; // B
-						pixel[3] = 255; // A
+						pixel[0] = 0;
+						pixel[1] = 0;
+						pixel[2] = 0;
+						pixel[3] = 255;
 					}
 					
-					// Draw the appropriate visualization based on active side
 					let elapsed = start_time.elapsed().as_secs_f32();
 					
 					match active_side {
-						ActiveSide::Original => {
-							// Draw only the original lines visualization
-							draw_original(&mut pixels, &world);
-						},
-						ActiveSide::Circular => {
-							// Draw only the circular visualization
-							draw_circular(&mut pixels, elapsed);
-						},
-						ActiveSide::Full => {
-							// Draw the full screen with multiple visualizations
-							draw_full_screen(&mut pixels, &world, elapsed);
-						},
-						ActiveSide::RayPattern => {
-							// Draw only the ray pattern
-							draw_ray_pattern(&mut pixels, elapsed);
-						},
-						ActiveSide::Pythagoras => {
-							// Draw Pythagoras visualization
-							draw_pythagoras(&mut pixels, elapsed);
-						},
-						ActiveSide::FibonacciSpiral => {
-							// Draw Fibonacci spiral
-							draw_fibonacci_spiral(&mut pixels, elapsed);
-						},
-						ActiveSide::SimpleProof => {
-							// Draw simple proof visualization
-							draw_simple_proof(&mut pixels, elapsed);
-						},
+						ActiveSide::Original => draw_original(&mut pixels, &world),
+						ActiveSide::Circular => draw_circular(&mut pixels, elapsed),
+						ActiveSide::Full => draw_full_screen(&mut pixels, &world, elapsed),
+						ActiveSide::RayPattern => draw_ray_pattern(&mut pixels, elapsed),
+						ActiveSide::Pythagoras => draw_pythagoras(&mut pixels, elapsed),
+						ActiveSide::FibonacciSpiral => draw_fibonacci_spiral(&mut pixels, elapsed),
+						ActiveSide::SimpleProof => draw_simple_proof(&mut pixels, elapsed),
 					}
 					
-					// ALWAYS draw the particle fountain no matter what
 					let frame = pixels.frame_mut();
 					draw_particle_fountain(frame, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, elapsed);
 					
-					// Update FPS counter
 					fps_counter.update();
 					
-					// Draw FPS counter in the bottom left
 					let fps_text = format!("FPS: {:.1}", fps_counter.fps());
 					draw_text(frame, &fps_text, 10, HEIGHT as i32 - 30, [255, 255, 0, 255], WIDTH);
 					
-					// Render the current frame
 					if let Err(err) = pixels.render() {
 						eprintln!("Pixels render error: {err}");
 						window_target.exit();
@@ -999,13 +879,10 @@ fn run_combined() -> Result<(), Error> {
 					}
 					
 					last_frame = Instant::now();
-					
-					// Schedule next frame
 					window_clone.request_redraw();
 				}
 			},
 			winit::event::Event::AboutToWait => {
-				// Request redraw when the event loop is about to wait
 				window_clone.request_redraw();
 			},
 			_ => {},
@@ -1017,26 +894,20 @@ fn run_combined() -> Result<(), Error> {
 
 // Draw the original visualization on the left half of the screen
 fn draw_original(pixels: &mut Pixels, world: &World) {
-	// Create a buffer for the original visualization
 	let mut original_buffer = vec![0u8; 4 * ORIGINAL_WIDTH as usize * ORIGINAL_HEIGHT as usize];
-	
-	// Draw the original visualization to this buffer
 	world.draw(&mut original_buffer);
 	
-	// Copy the original visualization to the left side of the combined frame
 	let frame = pixels.frame_mut();
-	
 	for y in 0..ORIGINAL_HEIGHT as usize {
 		for x in 0..ORIGINAL_WIDTH as usize {
 			let src_idx = 4 * (y * ORIGINAL_WIDTH as usize + x);
 			let dst_idx = 4 * (y * WIDTH as usize + x);
 			
-			// Only copy if within bounds
 			if src_idx + 3 < original_buffer.len() && dst_idx + 3 < frame.len() {
-				frame[dst_idx] = original_buffer[src_idx];       // R
-				frame[dst_idx + 1] = original_buffer[src_idx + 1]; // G
-				frame[dst_idx + 2] = original_buffer[src_idx + 2]; // B
-				frame[dst_idx + 3] = original_buffer[src_idx + 3]; // A
+				frame[dst_idx] = original_buffer[src_idx];
+				frame[dst_idx + 1] = original_buffer[src_idx + 1];
+				frame[dst_idx + 2] = original_buffer[src_idx + 2];
+				frame[dst_idx + 3] = original_buffer[src_idx + 3];
 			}
 		}
 	}
@@ -1044,17 +915,11 @@ fn draw_original(pixels: &mut Pixels, world: &World) {
 
 // Draw the circular visualization on the right half of the screen
 fn draw_circular(pixels: &mut Pixels, time: f32) {
-	// Get dimensions for the circular visuals (right side of screen)
 	let circular_width = mesmerise_circular::WIDTH;
 	let circular_height = mesmerise_circular::HEIGHT;
-	
-	// Create a temporary buffer for the circular visualization
 	let mut circular_buffer = vec![0u8; 4 * circular_width as usize * circular_height as usize];
-	
-	// Draw the circular visualization to this buffer
 	mesmerise_circular::draw_frame(&mut circular_buffer, time);
 	
-	// Copy the circular visualization to the right side of the combined frame
 	let frame = pixels.frame_mut();
 	let x_offset = ORIGINAL_WIDTH as usize;
 	
@@ -1063,12 +928,11 @@ fn draw_circular(pixels: &mut Pixels, time: f32) {
 			let src_idx = 4 * (y * circular_width as usize + x);
 			let dst_idx = 4 * (y * WIDTH as usize + (x + x_offset));
 			
-			// Only copy if within bounds
 			if src_idx + 3 < circular_buffer.len() && dst_idx + 3 < frame.len() {
-				frame[dst_idx] = circular_buffer[src_idx];       // R
-				frame[dst_idx + 1] = circular_buffer[src_idx + 1]; // G
-				frame[dst_idx + 2] = circular_buffer[src_idx + 2]; // B
-				frame[dst_idx + 3] = circular_buffer[src_idx + 3]; // A
+				frame[dst_idx] = circular_buffer[src_idx];
+				frame[dst_idx + 1] = circular_buffer[src_idx + 1];
+				frame[dst_idx + 2] = circular_buffer[src_idx + 2];
+				frame[dst_idx + 3] = circular_buffer[src_idx + 3];
 			}
 		}
 	}
@@ -1076,21 +940,19 @@ fn draw_circular(pixels: &mut Pixels, time: f32) {
 
 // Draw the full screen visualization with multiple sections
 fn draw_full_screen(pixels: &mut Pixels, world: &World, time: f32) {
-	// Clear to black first
 	for pixel in pixels.frame_mut().chunks_exact_mut(4) {
-		pixel[0] = 0; // R
-		pixel[1] = 0; // G
-		pixel[2] = 0; // B
-		pixel[3] = 255; // A
+		pixel[0] = 0;
+		pixel[1] = 0;
+		pixel[2] = 0;
+		pixel[3] = 255;
 	}
 	
 	let frame = pixels.frame_mut();
 	
-	// Section 1: Original visualization (top-left)
+	// Original visualization (top-left)
 	let mut original_buffer = vec![0u8; 4 * ORIGINAL_WIDTH as usize * ORIGINAL_HEIGHT as usize];
 	world.draw(&mut original_buffer);
 	
-	// Copy to top-left quadrant
 	for y in 0..ORIGINAL_HEIGHT as usize {
 		for x in 0..ORIGINAL_WIDTH as usize {
 			let src_idx = 4 * (y * ORIGINAL_WIDTH as usize + x);
@@ -1105,13 +967,12 @@ fn draw_full_screen(pixels: &mut Pixels, world: &World, time: f32) {
 		}
 	}
 	
-	// Section 2: Circular visualization (top-right)
+	// Circular visualization (top-right)
 	let circular_width = mesmerise_circular::WIDTH;
 	let circular_height = mesmerise_circular::HEIGHT;
 	let mut circular_buffer = vec![0u8; 4 * circular_width as usize * circular_height as usize];
 	mesmerise_circular::draw_frame(&mut circular_buffer, time);
 	
-	// Copy to top-right quadrant
 	let x_offset = ORIGINAL_WIDTH as usize;
 	for y in 0..circular_height as usize {
 		for x in 0..circular_width as usize {
@@ -1127,79 +988,45 @@ fn draw_full_screen(pixels: &mut Pixels, world: &World, time: f32) {
 		}
 	}
 	
-	// Section 3: Particle fountain (bottom-left)
+	// Particle fountain (bottom-left)
 	draw_particle_fountain(frame, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, time);
 	
-	// Section 4: Ray pattern visualization (bottom-right)
+	// Ray pattern visualization (bottom-right)
 	let ray_width = ORIGINAL_WIDTH;
 	let ray_height = ORIGINAL_HEIGHT;
 	let y_offset = ORIGINAL_HEIGHT as usize;
-
-	// Draw ray pattern directly to the frame buffer with the correct offsets
 	let ray_frame = &mut frame[(y_offset * WIDTH as usize * 4)..];
-	let ray_offset_x = x_offset;
-	let _ray_offset_y = 0; // Within the ray_frame, we're at the top
-
-	// Adjust the frame buffer and offsets for the ray pattern
-	ray_pattern::draw_frame(ray_frame, ray_width, ray_height, time, ray_offset_x, WIDTH);
+	ray_pattern::draw_frame(ray_frame, ray_width, ray_height, time, x_offset, WIDTH);
 }
 
 // Draw a particle fountain effect in the bottom-left quadrant
 fn draw_particle_fountain(frame: &mut [u8], full_width: u32, full_height: u32, quad_width: u32, quad_height: u32, time: f32) {
-	// Use y_offset to position particles in bottom-left quadrant
 	let y_offset = quad_height as usize;
-	
-	// Position fountain in the center of bottom-left quadrant
 	let fountain_x = quad_width as f32 / 2.0;
 	let fountain_y = y_offset as f32 + (full_height as f32 - y_offset as f32) / 2.0;
 	
-	// MASSIVELY BRIGHT BASE - impossible to miss
 	for radius in 0..40 {
 		let color_intensity = 255 - (radius * 5).min(255);
-		draw_circle(
-			frame,
-			fountain_x as i32,
-			fountain_y as i32,
-			40 - radius,
-			[255, color_intensity as u8, 0, 255],
-			full_width
-		);
+		draw_circle(frame, fountain_x as i32, fountain_y as i32, 40 - radius, [255, color_intensity as u8, 0, 255], full_width);
 	}
 	
-	// Draw huge label text with blinking effect
 	let blink = ((time * 5.0).sin() * 0.5 + 0.5) * 255.0;
-	draw_huge_text(
-		frame,
-		"FOUNTAIN", 
-		quad_width as i32 / 2 - 200,
-		y_offset as i32 + 50,
-		[255, blink as u8, blink as u8, 255],
-		full_width
-	);
+	draw_huge_text(frame, "FOUNTAIN", quad_width as i32 / 2 - 200, y_offset as i32 + 50, [255, blink as u8, blink as u8, 255], full_width);
 	
-	// Increase number of particles significantly
 	let particles = 1000;
-	
 	for i in 0..particles {
-		// Calculate particle position based on time and index
 		let lifetime = 2.0; 
 		let particle_time = (time + i as f32 * 0.01) % lifetime;
 		let progress = particle_time / lifetime;
 		
-		// Wider angle spread
 		let angle = std::f32::consts::PI / 2.0 + (i as f32 / particles as f32 - 0.5) * std::f32::consts::PI * 1.5;
-		
-		// Faster initial speed with stronger gravity
 		let speed = 600.0 * (1.0 - progress * 0.3);
 		let gravity = 800.0;
 		
-		// Calculate position with trajectory
 		let x = fountain_x + angle.cos() * speed * particle_time;
 		let y = fountain_y - angle.sin() * speed * particle_time + 0.5 * gravity * particle_time * particle_time;
 		
-		// Only draw if within the bottom-left quadrant
 		if x >= 0.0 && x < quad_width as f32 && y >= quad_height as f32 && y < full_height as f32 {
-			// Calculate fade based on lifetime
 			let fade = if progress < 0.1 {
 				progress / 0.1
 			} else if progress > 0.7 {
@@ -1208,44 +1035,27 @@ fn draw_particle_fountain(frame: &mut [u8], full_width: u32, full_height: u32, q
 				1.0
 			};
 			
-			// Vibrant rainbow colors - pure bright colors
 			let hue = (i as f32 / particles as f32 + time * 0.3) % 1.0;
 			let color = hsv_to_rgb(hue, 1.0, 1.0);
-			
-			// MUCH larger particles
 			let size = 4 + (10.0 * (1.0 - progress)) as i32;
 			
-			// Draw extra bright particle
-			draw_extra_bright_particle(
-				frame,
-				x as i32,
-				y as i32,
-				size,
-				[color[0], color[1], color[2], (255.0 * fade) as u8],
-				full_width
-			);
+			draw_extra_bright_particle(frame, x as i32, y as i32, size, [color[0], color[1], color[2], (255.0 * fade) as u8], full_width);
 		}
 	}
 	
-	// Draw solid white border around bottom-left quadrant to make it obvious
-	// Use time to create a pulsing border that alternates between white and red
 	let pulse = (time * 10.0).sin() > 0.0;
 	let border_color = if pulse { [255, 0, 0, 255] } else { [255, 255, 255, 255] };
 	draw_border(frame, 0, y_offset as i32, quad_width as i32, (full_height - quad_height) as i32, border_color, full_width);
 	
-	// Also clear the entire quadrant if we're in pulse phase to make it stand out
 	if pulse {
 		for y in y_offset..(full_height as usize) {
 			for x in 0..(quad_width as usize) {
 				let idx = 4 * (y * full_width as usize + x);
-				if idx + 3 < frame.len() {
-					// Every few pixels, draw a bright spot to ensure visibility
-					if (x + y) % 20 == 0 {
-						frame[idx] = 255;      // R
-						frame[idx + 1] = 255;  // G
-						frame[idx + 2] = 0;    // B
-						frame[idx + 3] = 255;  // A
-					}
+				if idx + 3 < frame.len() && (x + y) % 20 == 0 {
+					frame[idx] = 255;
+					frame[idx + 1] = 255;
+					frame[idx + 2] = 0;
+					frame[idx + 3] = 255;
 				}
 			}
 		}

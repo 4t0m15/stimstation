@@ -12,64 +12,11 @@ use std::time::{Duration, Instant};
 pub const WIDTH: u32 = 900;
 pub const HEIGHT: u32 = 300;
 
-fn main() {
-    // Set up window and input handling
-    let event_loop = EventLoop::new().unwrap();
-    let mut input = WinitInputHelper::new();
-
-    let window = WindowBuilder::new()
-        .with_title("Mesmerise - Final with Circular Visuals")
-        .with_inner_size(LogicalSize::new(WIDTH as f64, HEIGHT as f64))
-        .with_min_inner_size(LogicalSize::new(WIDTH as f64, HEIGHT as f64))
-        .build(&event_loop)
-        .unwrap();
-
-    // Set up pixel buffer
-    let mut pixels = {
-        let size = window.inner_size();
-        let surface = SurfaceTexture::new(size.width, size.height, &window);
-        Pixels::new(WIDTH, HEIGHT, surface).unwrap()
-    };
-
-    let start_time = Instant::now();
-    let mut last_frame = Instant::now();
-    let target_frame_time = Duration::from_secs_f32(1.0 / 60.0);
-
-    event_loop.run(move |event, window_target| {
-        // Default control flow is Poll
-        if input.update(&event) {
-            // Exit on Escape or window close
-            if input.key_pressed(KeyCode::Escape) || input.close_requested() {
-                window_target.exit();
-                return;
-            }
-
-            // Handle window resize
-            if let Some(size) = input.window_resized() {
-                pixels.resize_surface(size.width, size.height).unwrap();
-            }
-        }
-
-        // Draw at ~60 FPS
-        if last_frame.elapsed() >= target_frame_time {
-            let t = start_time.elapsed().as_secs_f32();
-            draw_frame(pixels.frame_mut(), t);
-            if pixels.render().is_err() {
-                window_target.exit();
-                return;
-            }
-            last_frame = Instant::now();
-        }
-    }).unwrap(); // Unwrap the result of run
-}
-
-/// Composite drawing routine splits the buffer into three regions.
 pub fn draw_frame(frame: &mut [u8], t: f32) {
     let w = WIDTH as usize;
     let h = HEIGHT as usize;
     let region_width = w / 3;
 
-    // Clear to opaque black
     for px in frame.chunks_exact_mut(4) {
         px[0] = 0;
         px[1] = 0;
@@ -77,13 +24,8 @@ pub fn draw_frame(frame: &mut [u8], t: f32) {
         px[3] = 255;
     }
 
-    // Region 0: Concentric rainbow circles
     draw_concentric_region(frame, 0, region_width, w, h, t);
-
-    // Region 1: Orbiting dots (spiral / radar)
     draw_orbit_region(frame, region_width, region_width, w, h, t);
-
-    // Region 2: Radial fan of beams
     draw_beams_region(frame, 2 * region_width, region_width, w, h, t);
 }
 
@@ -96,7 +38,6 @@ pub fn draw_concentric_region(
     h: usize,
     t: f32,
 ) {
-    let _cy = h / 2; // Marked as unused with underscore
     let radius = (region_w.min(h) as f32) * 0.45;
 
     for py in 0..h {

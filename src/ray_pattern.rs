@@ -1,7 +1,6 @@
 // Ray pattern visualization inspired by the yellow and green rays image
 use ab_glyph::{Font as _, FontArc, Glyph, PxScale};
-use font_kit::source::SystemSource;
-use font_kit::properties::Properties;
+use font_kit::{source::SystemSource, properties::Properties};
 use once_cell::sync::Lazy;
 use rand::prelude::*;
 use std::sync::{Arc, Mutex};
@@ -17,13 +16,6 @@ const AUDIO_VIZ_BARS: usize = 32;
 const AUDIO_VIZ_BASE_HEIGHT: f32 = 60.0;  // Base height for 1080p screen
 const AUDIO_VIZ_MIN_HEIGHT: f32 = 5.0;    // Minimum height for bars
 const AUDIO_VIZ_DECAY_RATE: f32 = 2.0;    // How quickly the bars react to changes
-
-// Static variables for ball positions and velocities
-static mut YELLOW_POS: Option<(f32, f32)> = None;
-static mut YELLOW_VEL: Option<(f32, f32)> = None;
-static mut GREEN_POS: Option<(f32, f32)> = None;
-static mut GREEN_VEL: Option<(f32, f32)> = None;
-static mut LAST_TIME: Option<f32> = None;
 
 // Sorting visualization data
 const SORT_ARRAY_SIZE: usize = 200; // A more reasonable size that won't cause overflow
@@ -661,23 +653,6 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
     ]
 }
 
-// Sample text content for text fragments
-static WIKIPEDIA_TEXT: &str = "Plug-in electric vehicle
-Electric cars have lower operating and maintenance costs
-All-electric vehicles have lower operating and maintenance costs
-Compared to conventional internal combustion engine vehicles
-Electric drive vehicles can contribute significantly
-Less dependence on imported oil
-Potential for zero emission transport
-Electric motors are more efficient at converting energy
-Better acceleration and torque characteristics
-Norway has the highest market penetration per capita in the world
-Electric vehicle battery technology continues to improve
-Battery electric vehicles use chemical energy stored in battery packs
-Plug-in hybrid electric vehicles are a good in-between option
-Charging infrastructure continues to expand globally";
-
-// Store for text fragments that will be displayed
 struct TextFragment {
     text: String,
     x: i32,
@@ -688,19 +663,12 @@ struct TextFragment {
     scale: f32,
 }
 
-// Static storage for text fragments
 static mut TEXT_FRAGMENTS: Option<Vec<TextFragment>> = None;
 static mut NEXT_FRAGMENT_TIME: Option<f32> = None;
-
-// Draw the ray pattern visualization to the provided frame buffer
-// Flag to track if audio thread has been started
 static mut AUDIO_THREAD_STARTED: bool = false;
-
-// Store information about the monitor
 static mut MONITOR_WIDTH: Option<u32> = None;
 static mut MONITOR_HEIGHT: Option<u32> = None;
 
-// Load the font once and store it
 static FONT: Lazy<FontArc> = Lazy::new(|| {
     let source = SystemSource::new();
     let handle = source
@@ -716,7 +684,6 @@ static FONT: Lazy<FontArc> = Lazy::new(|| {
     }
 });
 
-// Function to get screen dimensions from monitor
 pub fn set_monitor_dimensions(monitor: &MonitorHandle) {
     let size = monitor.size();
     unsafe {
@@ -1271,8 +1238,7 @@ fn put_pixel(frame: &mut [u8], width: u32, height: u32, x: i32, y: i32, color: &
 pub fn apply_force_yellow(force_x: f32, force_y: f32) {
     unsafe {
         if let Some(vel) = YELLOW_VEL {
-            let new_vel = (vel.0 + force_x, vel.1 + force_y);
-            YELLOW_VEL = Some(new_vel);
+            YELLOW_VEL = Some((vel.0 + force_x, vel.1 + force_y));
         }
     }
 }
@@ -1280,23 +1246,13 @@ pub fn apply_force_yellow(force_x: f32, force_y: f32) {
 pub fn apply_force_green(force_x: f32, force_y: f32) {
     unsafe {
         if let Some(vel) = GREEN_VEL {
-            let new_vel = (vel.0 + force_x, vel.1 + force_y);
-            GREEN_VEL = Some(new_vel);
+            GREEN_VEL = Some((vel.0 + force_x, vel.1 + force_y));
         }
     }
 }
 
-pub fn teleport_yellow(x: f32, y: f32) {
-    unsafe {
-        YELLOW_POS = Some((x, y));
-    }
-}
-
-pub fn teleport_green(x: f32, y: f32) {
-    unsafe {
-        GREEN_POS = Some((x, y));
-    }
-}
+pub fn teleport_yellow(x: f32, y: f32) { unsafe { YELLOW_POS = Some((x, y)); } }
+pub fn teleport_green(x: f32, y: f32) { unsafe { GREEN_POS = Some((x, y)); } }
 
 // Draw a shadow glow effect
 fn draw_shadow_glow(frame: &mut [u8], width: u32, height: u32, 
@@ -1354,11 +1310,6 @@ fn draw_shadow_glow(frame: &mut [u8], width: u32, height: u32,
 
 // Add a new random text fragment
 fn add_random_text_fragment(width: u32, height: u32, _time: f32) {
-    static WIKIPEDIA_TEXT: Lazy<String> = Lazy::new(|| {
-        std::fs::read_to_string("src/resources/wikipedia_text.txt")
-            .unwrap_or_else(|_| "Failed to load wikipedia text.".to_string())
-    });
-
     let mut rng = rand::thread_rng();
 
     if rng.gen::<f64>() < 0.1 {
@@ -1369,29 +1320,24 @@ fn add_random_text_fragment(width: u32, height: u32, _time: f32) {
                 }
 
                 let segment_length = rng.gen_range(20..80);
-                if WIKIPEDIA_TEXT.len() > segment_length {
-                    let start_pos = rng.gen_range(0..WIKIPEDIA_TEXT.len() - segment_length);
-                    let text = WIKIPEDIA_TEXT[start_pos..start_pos + segment_length]
-                        .trim()
-                        .to_string();
+                let text = format!("Text fragment {}", rng.gen_range(1..1000));
 
-                    let x = rng.gen_range(0..width as i32);
-                    let y = rng.gen_range(0..height as i32);
+                let x = rng.gen_range(0..width as i32);
+                let y = rng.gen_range(0..height as i32);
 
-                    let scale = rng.gen_range(20.0..40.0);
-                    let color = hsv_to_rgb(rng.gen_range(0.0..1.0), 0.8, 1.0);
-                    let lifetime = rng.gen_range(5.0..15.0);
+                let scale = rng.gen_range(20.0..40.0);
+                let color = hsv_to_rgb(rng.gen_range(0.0..1.0), 0.8, 1.0);
+                let lifetime = rng.gen_range(5.0..15.0);
 
-                    fragments.push(TextFragment {
-                        text,
-                        x,
-                        y,
-                        color,
-                        life: lifetime,
-                        max_life: lifetime,
-                        scale,
-                    });
-                }
+                fragments.push(TextFragment {
+                    text,
+                    x,
+                    y,
+                    color,
+                    life: lifetime,
+                    max_life: lifetime,
+                    scale,
+                });
             }
         }
     }
@@ -1511,4 +1457,10 @@ pub fn restart_sorters() {
             sorter.restart();
         }
     }
-} 
+}
+
+static mut YELLOW_POS: Option<(f32, f32)> = None;
+static mut YELLOW_VEL: Option<(f32, f32)> = None;
+static mut GREEN_POS: Option<(f32, f32)> = None;
+static mut GREEN_VEL: Option<(f32, f32)> = None;
+static mut LAST_TIME: Option<f32> = None; 

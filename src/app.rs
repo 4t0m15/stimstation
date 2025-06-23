@@ -1,691 +1,198 @@
-use crate::types::{SimpleLine, SimpleParticle, SimpleWorld, SimplePos, simple_hsv_to_rgb, VisualMode, MAX_LINES, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, Buffers};
-use crate::pixel_utils::*;
-use crate::{mesmerise_circular, ray_pattern, particle_fountain};
-use pixels::Pixels;
-use rand::prelude::*;
-use rand::{thread_rng, Rng};
+use crate::types::{ActiveSide, Color, FpsCounter, Buffers, World, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT};
+use crate::menu::Menu;
+use crate::visualizations;
+use crate::text_rendering;
+use winit::{
+    event::{MouseButton,WindowEvent},
+    keyboard::KeyCode,
+    window::Window,
+};
+use winit_input_helper::WinitInputHelper;
 use std::time::Instant;
+use pixels::Pixels;
 
-// Simple Line implementation for main.rs compatibility
-impl SimpleLine {
-    pub fn app_new(rng: &mut ThreadRng) -> Self {
-        let x = rng.gen_range(0.0..WIDTH as f32);
-        let y = rng.gen_range(0.0..HEIGHT as f32);
-        let speed = rng.gen_range(0.5..2.5);
-        let length = rng.gen_range(30.0..120.0);
-        
-        Self {
-            pos: [
-                (x, y),
-                (x + rng.gen_range(-length/2.0..length/2.0), y + rng.gen_range(-length/2.0..length/2.0)),
-            ],
-            vel: [
-                (rng.gen_range(-speed..speed), rng.gen_range(-speed..speed)),
-                (rng.gen_range(-speed..speed), rng.gen_range(-speed..speed)),
-            ],
-            color: [
-                rng.gen_range(50..200),
-                rng.gen_range(50..200),
-                rng.gen_range(150..255),
-            ],
-            width: rng.gen_range(1.0..3.5),
-            length,
-            cycle_speed: rng.gen_range(0.2..1.5),
-            cycle_offset: rng.gen_range(0.0..10.0),
-        }
-    }
-    
-    pub fn app_update(&mut self, rng: &mut ThreadRng, time: f32, mouse_pos: Option<SimplePos>) {
-        // Color cycling based on time
-        let hue = (time * self.cycle_speed + self.cycle_offset) % 1.0;
-        self.color = simple_hsv_to_rgb(hue, 0.8, 0.9);
-        
-        // Add mouse attraction if mouse position is available
-        if let Some((mx, my)) = mouse_pos {
-            // Calculate distance to mouse
-            let dist1 = ((self.pos[0].0 - mx).powi(2) + (self.pos[0].1 - my).powi(2)).sqrt();
-            let dist2 = ((self.pos[1].0 - mx).powi(2) + (self.pos[1].1 - my).powi(2)).sqrt();
-            
-            // Apply attraction force (inverse to distance)
-            if dist1 > 5.0 {  // Avoid extreme acceleration when very close
-                let force = 40.0 / dist1;
-                let dx = (mx - self.pos[0].0) / dist1 * force;
-                let dy = (my - self.pos[0].1) / dist1 * force;
-                self.vel[0].0 = (self.vel[0].0 * 0.95 + dx * 0.05).clamp(-3.0, 3.0);
-                self.vel[0].1 = (self.vel[0].1 * 0.95 + dy * 0.05).clamp(-3.0, 3.0);
-            }
-            
-            if dist2 > 5.0 {
-                let force = 40.0 / dist2;
-                let dx = (mx - self.pos[1].0) / dist2 * force;
-                let dy = (my - self.pos[1].1) / dist2 * force;
-                self.vel[1].0 = (self.vel[1].0 * 0.95 + dx * 0.05).clamp(-3.0, 3.0);
-                self.vel[1].1 = (self.vel[1].1 * 0.95 + dy * 0.05).clamp(-3.0, 3.0);
-            }
-        }
-        
-        // Update positions
-        for i in 0..2 {
-            self.pos[i].0 += self.vel[i].0;
-            self.pos[i].1 += self.vel[i].1;
-            
-            // Bounce off edges with energy loss
-            if self.pos[i].0 < 0.0 || self.pos[i].0 >= WIDTH as f32 {
-                self.vel[i].0 *= -0.9;  // 10% energy loss on bounce
-                self.pos[i].0 = self.pos[i].0.clamp(0.0, WIDTH as f32 - 1.0);
-            }
-            if self.pos[i].1 < 0.0 || self.pos[i].1 >= HEIGHT as f32 {
-                self.vel[i].1 *= -0.9;  // 10% energy loss on bounce
-                self.pos[i].1 = self.pos[i].1.clamp(0.0, HEIGHT as f32 - 1.0);
-            }
-        }
-        
-        // Maintain roughly constant line length by adding a spring force
-        let dx = self.pos[1].0 - self.pos[0].0;
-        let dy = self.pos[1].1 - self.pos[0].1;
-        let current_length = (dx * dx + dy * dy).sqrt();
-        let difference = current_length - self.length;
-        
-        if current_length > 0.1 {  // Avoid division by zero
-            let force = difference * 0.01;  // Spring force
-            let dx_norm = dx / current_length;
-            let dy_norm = dy / current_length;
-            
-            // Apply forces in opposite directions
-            self.vel[0].0 += dx_norm * force;
-            self.vel[0].1 += dy_norm * force;
-            self.vel[1].0 -= dx_norm * force;
-            self.vel[1].1 -= dy_norm * force;
-        }
-        
-        // Occasionally change velocity with small random adjustments
-        if rng.gen_bool(0.02) {
-            for i in 0..2 {
-                self.vel[i].0 = (self.vel[i].0 + rng.gen_range(-0.15..0.15)).clamp(-3.0, 3.0);
-                self.vel[i].1 = (self.vel[i].1 + rng.gen_range(-0.15..0.15)).clamp(-3.0, 3.0);
-            }
-        }
-    }
+pub struct App {
+    world: World,
+    menu: Menu,
+    active_side: ActiveSide,
+    start_time: Instant,
+    fps_counter: FpsCounter,
+    is_fullscreen: bool,
+    show_help: bool,
+    buffers: Buffers,
+    should_quit: bool,
 }
 
-// Simple Particle implementation for main.rs compatibility
-impl SimpleParticle {
-    pub fn app_new(x: f32, y: f32, rng: &mut impl Rng) -> Self {
-        let speed = rng.gen_range(1.0..5.0);
-        let angle = rng.gen_range(0.0..std::f32::consts::TAU);
-        
-        Self {
-            pos: (x, y),
-            vel: (angle.cos() * speed, angle.sin() * speed),
-            color: simple_hsv_to_rgb(rng.gen_range(0.0..1.0), 0.9, 1.0),
-            life: rng.gen_range(0.5..1.5),
-            size: rng.gen_range(1.0..3.0),
+impl App {
+    pub fn new() -> Self {
+        let mut world = World::new();
+        if let Some(monitor) = winit::window::Window::primary_monitor(&winit::event_loop::EventLoop::new().unwrap()) {
+            visualizations::ray_pattern::set_monitor_dimensions(&monitor);
         }
-    }
-    
-    pub fn app_update(&mut self, dt: f32) -> bool {
-        // Update position
-        self.pos.0 += self.vel.0;
-        self.pos.1 += self.vel.1;
-        
-        // Add some gravity
-        self.vel.1 += 0.1;
-        
-        // Reduce life
-        self.life -= dt;
-        
-        // Return true if still alive
-        self.life > 0.0
-    }
-}
 
-// Simple World implementation for main.rs compatibility
-impl SimpleWorld {
-    pub fn app_new() -> Self {
-        let mut rng = thread_rng();
         Self {
-            lines: (0..MAX_LINES).map(|_| SimpleLine::app_new(&mut rng)).collect(),
-            rng,
+            world,
+            menu: Menu::new(),
+            active_side: ActiveSide::Full,
             start_time: Instant::now(),
-            mouse_pos: None,
-            mouse_active: false,
-            background_color: [0, 0, 0],
-            mode: VisualMode::Normal,
-            particles: Vec::with_capacity(500),
-            target_line_count: MAX_LINES,
-        }
-    }
-    
-    pub fn app_create_explosion(&mut self, x: f32, y: f32, count: usize) {
-        for _ in 0..count {
-            self.particles.push(SimpleParticle::app_new(x, y, &mut self.rng));
+            fps_counter: FpsCounter::new(),
+            is_fullscreen: false,
+            show_help: false,
+            buffers: Buffers::new(),
+            should_quit: false,
         }
     }
 
-    pub fn app_update(&mut self) {
-        let elapsed = self.start_time.elapsed().as_secs_f32();
-        
-        // Update particles
-        let dt = 1.0 / 60.0; // Assume 60 FPS for physics
-        self.particles.retain_mut(|p| p.app_update(dt));
-        
-        // Slowly cycle background color
-        let bg_hue = (elapsed * 0.02) % 1.0;
-        self.background_color = simple_hsv_to_rgb(bg_hue, 0.5, 0.1); // Low value for dark background
-        
-        // Apply different effects based on mode
-        match self.mode {
-            VisualMode::Normal => {
-                // Normal update with mouse interaction
-                for line in &mut self.lines {
-                    line.app_update(&mut self.rng, elapsed, self.mouse_pos);
-                }
-            },
-            VisualMode::Vortex => {
-                // Create a vortex effect around the center or mouse
-                let center = self.mouse_pos.unwrap_or((WIDTH as f32 / 2.0, HEIGHT as f32 / 2.0));
-                
-                for line in &mut self.lines {
-                    // First update normally
-                    line.app_update(&mut self.rng, elapsed, None);
-                    
-                    // Then add vortex effect
-                    for i in 0..2 {
-                        let dx = line.pos[i].0 - center.0;
-                        let dy = line.pos[i].1 - center.1;
-                        let dist = (dx * dx + dy * dy).sqrt();
-                        
-                        if dist > 5.0 {
-                            // Calculate perpendicular force (for rotation)
-                            let force = 300.0 / dist;
-                            let vx = -dy / dist * force;
-                            let vy = dx / dist * force;
-                            
-                            // Apply vortex force
-                            line.vel[i].0 = (line.vel[i].0 * 0.95 + vx * 0.05).clamp(-5.0, 5.0);
-                            line.vel[i].1 = (line.vel[i].1 * 0.95 + vy * 0.05).clamp(-5.0, 5.0);
-                        }
-                    }
-                }
-            },
-            VisualMode::Waves => {
-                // Create wave-like motion
-                let time_factor = elapsed * 2.0;
-                
-                for line in &mut self.lines {
-                    // Normal update first
-                    line.app_update(&mut self.rng, elapsed, None);
-                    
-                    // Add wave effect - vary speed based on position
-                    for i in 0..2 {
-                        let wave_x = (line.pos[i].0 / 100.0 + time_factor).sin() * 0.2;
-                        let wave_y = (line.pos[i].1 / 80.0 + time_factor * 0.7).cos() * 0.2;
-                        
-                        line.vel[i].0 = (line.vel[i].0 * 0.95 + wave_x).clamp(-3.0, 3.0);
-                        line.vel[i].1 = (line.vel[i].1 * 0.95 + wave_y).clamp(-3.0, 3.0);
-                    }
-                }
-            },
-            VisualMode::Rainbow => {
-                // Create rainbow effect with synchronized colors
-                let global_hue = elapsed * 0.3 % 1.0; // Global hue that changes over time
-                let line_count = self.lines.len() as f32; // Calculate once before the loop
-                
-                for (i, line) in self.lines.iter_mut().enumerate() {
-                    // Normal update first
-                    line.app_update(&mut self.rng, elapsed, None);
-                    
-                    // Set rainbow color pattern with offset based on line index
-                    let line_offset = (i as f32 / line_count) * 0.5;
-                    let hue = (global_hue + line_offset) % 1.0;
-                    line.color = simple_hsv_to_rgb(hue, 0.9, 0.9);
-                    
-                    // Add swirling motion
-                    for j in 0..2 {
-                        let angle = elapsed * 0.2 + (i as f32 * 0.01);
-                        let swirl_x = angle.sin() * 0.2;
-                        let swirl_y = angle.cos() * 0.2;
-                        
-                        line.vel[j].0 = (line.vel[j].0 * 0.95 + swirl_x).clamp(-3.0, 3.0);
-                        line.vel[j].1 = (line.vel[j].1 * 0.95 + swirl_y).clamp(-3.0, 3.0);
-                    }
-                }
+    pub fn handle_input(&mut self, input: &mut WinitInputHelper, window: &Window) {
+        if self.menu.is_visible() {
+            self.menu.handle_input(input, self.start_time.elapsed().as_secs_f32());
+            if self.menu.has_made_selection() {
+                self.active_side = self.menu.get_selected_visualization();
+                self.menu.reset_selection();
+                self.update_window_title(window);
             }
-        }
-        
-        // Spawn new lines when mouse button is held
-        if self.mouse_active && self.rng.gen_bool(0.1) {
-            if let Some((x, y)) = self.mouse_pos {
-                if self.lines.len() < MAX_LINES * 2 {
-                    let mut new_line = SimpleLine::app_new(&mut self.rng);
-                    new_line.pos[0] = (x, y);
-                    new_line.pos[1] = (
-                        x + self.rng.gen_range(-new_line.length/2.0..new_line.length/2.0),
-                        y + self.rng.gen_range(-new_line.length/2.0..new_line.length/2.0)
-                    );
-                    self.lines.push(new_line);
-                }
-            }
-        }
-        
-        // Maintain a reasonable number of lines
-        while self.lines.len() > MAX_LINES && !self.mouse_active {
-            self.lines.remove(0);
-        }
-        
-        // Maintain line count target (slowly adjust)
-        if !self.mouse_active {
-            if self.lines.len() < self.target_line_count && self.rng.gen_bool(0.1) {
-                self.lines.push(SimpleLine::app_new(&mut self.rng));
-            } else if self.lines.len() > self.target_line_count && self.rng.gen_bool(0.1) {
-                self.lines.remove(0);
-            }
-        }
-    }
-    
-    pub fn app_draw(&self, frame: &mut [u8]) {
-        // Check if we need trails effect (for Rainbow mode)
-        let use_trails = self.mode == VisualMode::Rainbow;
-        
-        if use_trails {
-            // Fade the previous frame instead of clearing it
-            frame.chunks_exact_mut(4).for_each(|pixel| {
-                // Fade each color channel
-                pixel[0] = (pixel[0] as f32 * 0.85) as u8;
-                pixel[1] = (pixel[1] as f32 * 0.85) as u8;
-                pixel[2] = (pixel[2] as f32 * 0.85) as u8;
-                pixel[3] = 255; // A
-            });
-        } else {
-            // Set background with custom color
-            frame.chunks_exact_mut(4).for_each(|pixel| {
-                pixel[0] = self.background_color[0]; // R
-                pixel[1] = self.background_color[1]; // G
-                pixel[2] = self.background_color[2]; // B
-                pixel[3] = 255; // A
-            });
-        }
-        
-        // Draw all lines
-        for line in &self.lines {
-            draw_line(
-                frame, 
-                line.pos[0].0 as i32, line.pos[0].1 as i32, 
-                line.pos[1].0 as i32, line.pos[1].1 as i32, 
-                [line.color[0], line.color[1], line.color[2], 255], 
-                line.width as i32
-            );
-        }
-        
-        // Draw all particles
-        for particle in &self.particles {
-            // Calculate alpha based on remaining life
-            let alpha = ((particle.life / 1.5) * 255.0) as u8;
-            
-            // Draw the particle as a point with glow
-            draw_point(
-                frame,
-                particle.pos.0 as i32,
-                particle.pos.1 as i32,
-                [particle.color[0], particle.color[1], particle.color[2], alpha],
-                particle.size as i32
-            );
-        }
-    }
-    
-    pub fn app_set_mouse_pos(&mut self, x: f32, y: f32) {
-        self.mouse_pos = Some((x, y));
-    }
-    
-    pub fn app_set_mouse_active(&mut self, active: bool) {
-        self.mouse_active = active;
-    }
-    
-    pub fn app_toggle_mode(&mut self) {
-        self.mode = match self.mode {
-            VisualMode::Normal => VisualMode::Vortex,
-            VisualMode::Vortex => VisualMode::Waves,
-            VisualMode::Waves => VisualMode::Rainbow,
-            VisualMode::Rainbow => VisualMode::Normal,
-        };
-    }
-    
-    pub fn app_add_lines(&mut self, count: usize) {
-        self.target_line_count = (self.target_line_count + count).min(MAX_LINES * 3);
-        
-        // Immediately add some lines to reach target
-        while self.lines.len() < self.target_line_count && self.lines.len() < MAX_LINES * 3 {
-            self.lines.push(SimpleLine::app_new(&mut self.rng));
-        }
-    }
-    
-    pub fn app_remove_lines(&mut self, count: usize) {
-        self.target_line_count = self.target_line_count.saturating_sub(count).max(10);
-        
-        // Remove lines if we have too many
-        while self.lines.len() > self.target_line_count && !self.lines.is_empty() {
-            self.lines.remove(0);
-        }
-    }
-    
-    // Get current info for the window title
-    pub fn app_get_status(&self) -> String {
-        format!("Mesmerise - Mode: {:?} - Lines: {} - Space: change mode, +/-: lines, E: explosion, 1-4: views, Mouse: interact",
-            self.mode, self.lines.len())
-    }
-}
-
-// Bresenham's line algorithm with thickness and glow effect - Improved with safe pixel operations
-pub fn draw_line(frame: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4], width: i32) {
-    let dx = (x1 - x0).abs();
-    let dy = (y1 - y0).abs();
-    let sx = if x0 < x1 { 1 } else { -1 };
-    let sy = if y0 < y1 { 1 } else { -1 };
-    let mut err = dx - dy;
-    let mut x = x0;
-    let mut y = y0;
-    let glow_radius = width * 3;
-    let height = frame.len() / (4 * WIDTH as usize);
-    
-    if (x0 < 0 && x1 < 0) || (x0 >= WIDTH as i32 && x1 >= WIDTH as i32) ||
-       (y0 < 0 && y1 < 0) || (y0 >= height as i32 && y1 >= height as i32) {
-        return;
-    }
-
-    while x >= 0 && x < WIDTH as i32 && y >= 0 && y < HEIGHT as i32 {
-        for w_y in -glow_radius..=glow_radius {
-            for w_x in -glow_radius..=glow_radius {
-                let distance_squared = w_x * w_x + w_y * w_y;
-                let distance = (distance_squared as f32).sqrt();
-                
-                if distance > glow_radius as f32 { continue; }
-                
-                let intensity = if distance <= width as f32 {
-                    1.0
-                } else {
-                    let falloff = 1.0 - (distance - width as f32) / (glow_radius as f32 - width as f32);
-                    falloff * falloff
-                };
-                
-                blend_pixel_safe(frame, x + w_x, y + w_y, WIDTH, HEIGHT as u32, color, intensity);
-            }
+            return;
         }
 
-        if x == x1 && y == y1 { break; }
+        if input.key_pressed(KeyCode::Escape) {
+            self.menu.toggle_visibility(self.start_time.elapsed().as_secs_f32());
+        }
 
-        let e2 = 2 * err;
-        if e2 > -dy { err -= dy; x += sx; }
-        if e2 < dx { err += dx; y += sy; }
-    }
-}
+        if input.key_pressed(KeyCode::Space) {
+            self.world.toggle_mode();
+            self.update_window_title(window);
+        }
 
-// Helper function to draw a glowing point with improved safety
-pub fn draw_point(frame: &mut [u8], x: i32, y: i32, color: [u8; 4], size: i32) {
-    let glow_radius = size * 2;
-    let _height = frame.len() / (4 * WIDTH as usize);
-    
-    if x + glow_radius < 0 || x - glow_radius >= WIDTH as i32 || 
-       y + glow_radius < 0 || y - glow_radius >= HEIGHT as i32 {
-        return;
-    }
-    
-    for w_y in -glow_radius..=glow_radius {
-        for w_x in -glow_radius..=glow_radius {
-            let distance_squared = w_x * w_x + w_y * w_y;
-            let distance = (distance_squared as f32).sqrt();
-            
-            if distance > glow_radius as f32 { continue; }
-            
-            let intensity = if distance <= size as f32 {
-                1.0
+        if input.key_pressed(KeyCode::KeyH) {
+            self.show_help = !self.show_help;
+            self.update_window_title(window);
+        }
+
+        if input.key_pressed(KeyCode::KeyF) || input.key_pressed(KeyCode::F11) {
+            self.is_fullscreen = !self.is_fullscreen;
+            window.set_fullscreen(if self.is_fullscreen {
+                Some(winit::window::Fullscreen::Borderless(None))
             } else {
-                let falloff = 1.0 - (distance - size as f32) / (glow_radius as f32 - size as f32);
-                falloff * falloff
-            };
-            
-            let alpha_factor = color[3] as f32 / 255.0;
-            let r = (intensity * color[0] as f32 * alpha_factor) as u8;
-            let g = (intensity * color[1] as f32 * alpha_factor) as u8;
-            let b = (intensity * color[2] as f32 * alpha_factor) as u8;
-            
-            blend_pixel_safe(frame, x + w_x, y + w_y, WIDTH, HEIGHT as u32, [r, g, b, color[3]], 1.0);
-        }
-    }
-}
-
-// Drawing functions for different modes
-pub fn draw_original_with_buffer(pixels: &mut Pixels, world: &SimpleWorld, buffer: &mut Vec<u8>) {
-    // Manually draw the world to the buffer
-    draw_world_to_buffer(world, buffer);
-    let frame = pixels.frame_mut();
-    for y in 0..ORIGINAL_HEIGHT as usize {
-        for x in 0..ORIGINAL_WIDTH as usize {
-            let src_idx = 4 * (y * ORIGINAL_WIDTH as usize + x);
-            let dst_idx = 4 * (y * WIDTH as usize + x);
-            if src_idx + 3 < buffer.len() && dst_idx + 3 < frame.len() {
-                frame[dst_idx] = buffer[src_idx];
-                frame[dst_idx + 1] = buffer[src_idx + 1];
-                frame[dst_idx + 2] = buffer[src_idx + 2];
-                frame[dst_idx + 3] = buffer[src_idx + 3];
+                None
+            });
+            if let Some(monitor) = window.primary_monitor() {
+                visualizations::ray_pattern::set_monitor_dimensions(&monitor);
             }
         }
-    }
-}
 
-// Helper function to draw the world to a buffer
-fn draw_world_to_buffer(world: &SimpleWorld, frame: &mut [u8]) {
-    // Check if we need trails effect (for Rainbow mode)
-    let use_trails = world.mode == VisualMode::Rainbow;
-    
-    if use_trails {
-        // Fade the previous frame
-        frame.chunks_exact_mut(4).for_each(|pixel| {
-            pixel[0] = (pixel[0] as f32 * 0.85) as u8;
-            pixel[1] = (pixel[1] as f32 * 0.85) as u8;
-            pixel[2] = (pixel[2] as f32 * 0.85) as u8;
-            pixel[3] = 255;
-        });
-    } else {
-        // Set background with custom color
-        frame.chunks_exact_mut(4).for_each(|pixel| {
-            pixel[0] = world.background_color[0];
-            pixel[1] = world.background_color[1];
-            pixel[2] = world.background_color[2];
-            pixel[3] = 255;
-        });
-    }
-    
-    // Draw all lines
-    for line in &world.lines {
-        draw_line(
-            frame, 
-            line.pos[0].0 as i32, line.pos[0].1 as i32, 
-            line.pos[1].0 as i32, line.pos[1].1 as i32, 
-            [line.color[0], line.color[1], line.color[2], 255], 
-            line.width as i32
-        );
-    }
-    
-    // Draw all particles
-    for particle in &world.particles {
-        let alpha = ((particle.life / 1.5) * 255.0) as u8;
-        draw_point(
-            frame,
-            particle.pos.0 as i32,
-            particle.pos.1 as i32,
-            [particle.color[0], particle.color[1], particle.color[2], alpha],
-            particle.size as i32
-        );
-    }
-}
-
-pub fn draw_circular_with_buffer(pixels: &mut Pixels, time: f32, buffer: &mut Vec<u8>) {
-    mesmerise_circular::draw_frame(buffer, time);
-    let frame = pixels.frame_mut();
-    let x_offset = ORIGINAL_WIDTH as usize;
-    let circular_width = mesmerise_circular::WIDTH as usize;
-    let circular_height = mesmerise_circular::HEIGHT as usize;
-    for y in 0..circular_height {
-        for x in 0..circular_width {
-            let src_idx = 4 * (y * circular_width + x);
-            let dst_idx = 4 * (y * WIDTH as usize + (x + x_offset));
-            if src_idx + 3 < buffer.len() && dst_idx + 3 < frame.len() {
-                frame[dst_idx] = buffer[src_idx];
-                frame[dst_idx + 1] = buffer[src_idx + 1];
-                frame[dst_idx + 2] = buffer[src_idx + 2];
-                frame[dst_idx + 3] = buffer[src_idx + 3];
+        if let Some(mouse_pos) = input.cursor() {
+            let window_size = window.inner_size();
+            if mouse_pos.0 < window_size.width as f32 / 2.0 {
+                let adjusted_x = mouse_pos.0;
+                let scale_x = ORIGINAL_WIDTH as f32 / (window_size.width as f32 / 2.0);
+                let scale_y = ORIGINAL_HEIGHT as f32 / window_size.height as f32;
+                self.world.set_mouse_pos(glam::vec2(adjusted_x * scale_x, mouse_pos.1 * scale_y));
+            } else {
+                self.world.mouse_pos = None;
             }
         }
-    }
-}
 
-pub fn draw_full_screen_with_buffer(pixels: &mut Pixels, world: &SimpleWorld, time: f32, buffers: &mut Buffers) {
-    let frame = pixels.frame_mut();
-    // Original visualization (top-left)
-    draw_world_to_buffer(world, &mut buffers.original);
-    for y in 0..ORIGINAL_HEIGHT as usize {
-        for x in 0..ORIGINAL_WIDTH as usize {
-            let src_idx = 4 * (y * ORIGINAL_WIDTH as usize + x);
-            let dst_idx = 4 * (y * WIDTH as usize + x);
-            if src_idx + 3 < buffers.original.len() && dst_idx + 3 < frame.len() {
-                frame[dst_idx] = buffers.original[src_idx];
-                frame[dst_idx + 1] = buffers.original[src_idx + 1];
-                frame[dst_idx + 2] = buffers.original[src_idx + 2];
-                frame[dst_idx + 3] = buffers.original[src_idx + 3];
+        if let Some(_) = input.cursor() {
+            let window_size = window.inner_size();
+            if input.cursor().unwrap().0 < window_size.width as f32 / 2.0 {
+                self.world.set_mouse_active(input.mouse_held(MouseButton::Left));
+            } else {
+                self.world.set_mouse_active(false);
             }
         }
-    }
-    // Circular visualization (top-right)
-    mesmerise_circular::draw_frame(&mut buffers.circular, time);
-    let x_offset = ORIGINAL_WIDTH as usize;
-    let circular_width = mesmerise_circular::WIDTH as usize;
-    let circular_height = mesmerise_circular::HEIGHT as usize;
-    for y in 0..circular_height {
-        for x in 0..circular_width {
-            let src_idx = 4 * (y * circular_width + x);
-            let dst_idx = 4 * (y * WIDTH as usize + (x + x_offset));
-            if src_idx + 3 < buffers.circular.len() && dst_idx + 3 < frame.len() {
-                frame[dst_idx] = buffers.circular[src_idx];
-                frame[dst_idx + 1] = buffers.circular[src_idx + 1];
-                frame[dst_idx + 2] = buffers.circular[src_idx + 2];
-                frame[dst_idx + 3] = buffers.circular[src_idx + 3];
-            }
-        }
-    }
-    // Particle fountain (bottom-left)
-    particle_fountain::draw_frame(frame, WIDTH, HEIGHT, time);
-    // Ray pattern visualization (bottom-right)
-    let ray_width = ORIGINAL_WIDTH;
-    let ray_height = ORIGINAL_HEIGHT;
-    let y_offset = ORIGINAL_HEIGHT as usize;
-    let ray_frame = &mut frame[(y_offset * WIDTH as usize * 4)..];
-    ray_pattern::draw_frame(ray_frame, ray_width, ray_height, time, x_offset, WIDTH);
-}
 
-// Draw the ray pattern visualization on the full screen
-pub fn draw_ray_pattern(pixels: &mut Pixels, time: f32) {
-    // Clear to black first
-    for pixel in pixels.frame_mut().chunks_exact_mut(4) {
-        pixel[0] = 0; // R
-        pixel[1] = 0; // G
-        pixel[2] = 0; // B
-        pixel[3] = 255; // A
-    }
-    
-    let frame = pixels.frame_mut();
-    
-    // Draw the ray pattern directly to the frame buffer using the full width and height
-    // Use the actual WIDTH and HEIGHT for ray pattern to fill the entire buffer
-    ray_pattern::draw_frame(frame, WIDTH, HEIGHT, time, 0, WIDTH);
-}
+        if input.key_pressed(KeyCode::KeyE) {
+            let center_x = ORIGINAL_WIDTH as f32 / 2.0;
+            let center_y = HEIGHT as f32 / 2.0;
+            self.world.create_explosion(glam::vec2(center_x, center_y), 200);
+        }
 
-// Draw all visualizations combined into one screen
-pub fn draw_all_visualizations(pixels: &mut Pixels, world: &SimpleWorld, time: f32) {
-    let frame = pixels.frame_mut();
-    
-    // Clear with a deep blue/black gradient background
-    for y in 0..HEIGHT as usize {
-        let gradient_factor = y as f32 / HEIGHT as f32;
-        let bg_blue = (20.0 * gradient_factor) as u8;
-        for x in 0..WIDTH as usize {
-            let idx = 4 * (y * WIDTH as usize + x);
-            frame[idx] = 0;       // R
-            frame[idx + 1] = 0;   // G
-            frame[idx + 2] = bg_blue; // B
-            frame[idx + 3] = 255; // A
-        }
-    }
-    
-    // Draw ray pattern with reduced opacity as background effect
-    let ray_frame = &mut frame.to_vec();
-    ray_pattern::draw_frame(ray_frame, WIDTH, HEIGHT, time, 0, WIDTH);
-    
-    // Blend ray pattern with reduced opacity
-    for (dst, src) in frame.chunks_exact_mut(4).zip(ray_frame.chunks_exact(4)) {
-        dst[0] = (dst[0] as u16 * 8 + src[0] as u16 * 2) as u8 / 10; // R
-        dst[1] = (dst[1] as u16 * 8 + src[1] as u16 * 2) as u8 / 10; // G
-        dst[2] = (dst[2] as u16 * 8 + src[2] as u16 * 2) as u8 / 10; // B
-    }
-    
-    // Draw moving particles throughout the entire screen
-    particle_fountain::draw_frame(frame, WIDTH, HEIGHT, time);
-    
-    // Draw world lines with full opacity in center area
-    let world_buffer = &mut vec![0u8; 4 * WIDTH as usize * HEIGHT as usize];
-    world.draw(world_buffer);
-    
-    // Calculate circle parameters for blending the world
-    let center_x = WIDTH as f32 / 2.0;
-    let center_y = HEIGHT as f32 / 2.0;
-    let max_radius = (WIDTH.min(HEIGHT) / 2) as f32 * 0.8;
-    
-    // Blend world buffer with main frame using circular mask
-    for y in 0..HEIGHT as usize {
-        for x in 0..WIDTH as usize {
-            let idx = 4 * (y * WIDTH as usize + x);
-            
-            // Calculate distance from center
-            let dx = x as f32 - center_x;
-            let dy = y as f32 - center_y;
-            let dist = (dx*dx + dy*dy).sqrt();
-            
-            // Create circular gradient for blending
-            if dist < max_radius {
-                let blend_factor = 1.0 - (dist / max_radius).powi(3);
-                
-                frame[idx] = (frame[idx] as f32 * (1.0 - blend_factor) + 
-                             world_buffer[idx] as f32 * blend_factor) as u8;
-                frame[idx + 1] = (frame[idx + 1] as f32 * (1.0 - blend_factor) + 
-                                 world_buffer[idx + 1] as f32 * blend_factor) as u8;
-                frame[idx + 2] = (frame[idx + 2] as f32 * (1.0 - blend_factor) + 
-                                 world_buffer[idx + 2] as f32 * blend_factor) as u8;
+        if input.mouse_pressed(MouseButton::Right) {
+            if let Some(pos) = self.world.mouse_pos {
+                self.world.create_explosion(pos, 100);
             }
         }
-    }
-    
-    // Draw mesmerise circular effect in top-right corner with 40% opacity
-    let circular_buffer = &mut vec![0u8; 4 * mesmerise_circular::WIDTH as usize * mesmerise_circular::HEIGHT as usize];
-    mesmerise_circular::draw_frame(circular_buffer, time);
-    
-    // Blend circular effect into top-right area at 40% opacity
-    let corner_x = WIDTH as usize - mesmerise_circular::WIDTH as usize;
-    let corner_y = 0;
-    let circular_width = mesmerise_circular::WIDTH as usize;
-    let circular_height = mesmerise_circular::HEIGHT as usize;
-    
-    for y in 0..circular_height {
-        for x in 0..circular_width {
-            if y + corner_y < HEIGHT as usize && x + corner_x < WIDTH as usize {
-                let src_idx = 4 * (y * circular_width + x);
-                let dst_idx = 4 * ((y + corner_y) * WIDTH as usize + (x + corner_x));
-                
-                // Only blend non-black pixels with 40% opacity
-                if circular_buffer[src_idx] > 0 || circular_buffer[src_idx + 1] > 0 || circular_buffer[src_idx + 2] > 0 {
-                    frame[dst_idx] = (frame[dst_idx] as f32 * 0.6 + circular_buffer[src_idx] as f32 * 0.4) as u8;
-                    frame[dst_idx + 1] = (frame[dst_idx + 1] as f32 * 0.6 + circular_buffer[src_idx + 1] as f32 * 0.4) as u8;
-                    frame[dst_idx + 2] = (frame[dst_idx + 2] as f32 * 0.6 + circular_buffer[src_idx + 2] as f32 * 0.4) as u8;
-                }
-            }
+
+        if input.key_pressed(KeyCode::Equal) {
+            self.world.add_lines(10);
+            self.update_window_title(window);
         }
+
+        if input.key_pressed(KeyCode::Minus) {
+            self.world.remove_lines(10);
+            self.update_window_title(window);
+        }
+
+        let new_active_side = match () {
+            _ if input.key_pressed(KeyCode::Digit1) => Some(ActiveSide::Original),
+            _ if input.key_pressed(KeyCode::Digit2) => Some(ActiveSide::Circular),
+            _ if input.key_pressed(KeyCode::Digit3) => Some(ActiveSide::Full),
+            _ if input.key_pressed(KeyCode::Digit4) => Some(ActiveSide::RayPattern),
+            _ if input.key_pressed(KeyCode::Digit5) => Some(ActiveSide::Pythagoras),
+            _ if input.key_pressed(KeyCode::Digit6) => Some(ActiveSide::FibonacciSpiral),
+            _ if input.key_pressed(KeyCode::Digit7) => Some(ActiveSide::SimpleProof),
+            _ if input.key_pressed(KeyCode::Digit8) => Some(ActiveSide::Combined),
+            _ => None,
+        };
+
+        if let Some(new_side) = new_active_side {
+            self.active_side = new_side;
+            self.update_window_title(window);
+        }
+    }
+
+    pub fn update(&mut self) {
+        self.world.update();
+        self.menu.update(self.start_time.elapsed().as_secs_f32());
+        self.fps_counter.update();
+    }
+
+    pub fn draw(&mut self, frame: &mut [u8]) {
+        self.buffers.clear();
+        let elapsed = self.start_time.elapsed().as_secs_f32();
+
+        match self.active_side {
+            ActiveSide::Original => visualizations::draw_original(frame, &self.world, &mut self.buffers.original),
+            ActiveSide::Circular => visualizations::draw_circular_with_buffer(frame, elapsed, &mut self.buffers.circular),
+            ActiveSide::Full => visualizations::draw_full_screen_with_buffer(frame, &self.world, elapsed, &mut self.buffers),
+            ActiveSide::RayPattern => visualizations::draw_ray_pattern(frame, elapsed),
+            ActiveSide::Pythagoras => visualizations::pythagoras::draw_frame(frame, elapsed),
+            ActiveSide::FibonacciSpiral => visualizations::fibonacci_spiral::draw_frame(frame, elapsed),
+            ActiveSide::SimpleProof => visualizations::simple_proof::draw_frame(frame, elapsed),
+            ActiveSide::Combined => visualizations::draw_all_visualizations(frame, &self.world, elapsed),
+        }
+
+        let fps_text = format!("FPS: {:.1}", self.fps_counter.fps());
+        text_rendering::draw_text_ab_glyph(frame, &fps_text, 10.0, (HEIGHT - 30) as f32, [255, 255, 0, 255], WIDTH);
+
+        if self.show_help {
+            text_rendering::draw_keyboard_guide(frame, WIDTH);
+        }
+
+        if self.menu.is_visible() {
+            self.menu.render(frame, WIDTH, HEIGHT);
+        }
+    }
+
+    pub fn should_quit(&self) -> bool {
+        self.should_quit
+    }
+
+    pub fn quit(&mut self) {
+        self.should_quit = true;
+    }
+
+    fn update_window_title(&self, window: &Window) {
+        let title = match self.active_side {
+            ActiveSide::Original => "StimStation - Original Visualization".to_string(),
+            ActiveSide::Circular => "StimStation - Circular Visualization".to_string(),
+            ActiveSide::Full => "StimStation - All Visualizations (Grid)".to_string(),
+            ActiveSide::RayPattern => "StimStation - Ray Pattern".to_string(),
+            ActiveSide::Pythagoras => "StimStation - Pythagoras Theorem".to_string(),
+            ActiveSide::FibonacciSpiral => "StimStation - Fibonacci Spiral".to_string(),
+            ActiveSide::SimpleProof => "StimStation - Simple Proof".to_string(),
+            ActiveSide::Combined => "StimStation - Combined Experience".to_string(),
+        };
+        window.set_title(&title);
     }
 }

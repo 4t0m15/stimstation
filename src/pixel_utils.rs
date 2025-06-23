@@ -1,3 +1,5 @@
+use crate::types::{WIDTH, HEIGHT};
+
 // Pixel utility functions for drawing directly to a [u8] frame buffer
 // All functions here are pub and operate only on raw frame data
 
@@ -37,28 +39,34 @@ pub fn draw_line(frame: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, color: [u
     let mut x = x0;
     let mut y = y0;
     let glow_radius = width * 3;
-    let w = width as u32;
-    let height = frame.len() / (4 * w as usize);
-    if (x0 < 0 && x1 < 0) || (x0 >= w as i32 && x1 >= w as i32) ||
+    let height = frame.len() / (4 * WIDTH as usize);
+
+    if (x0 < 0 && x1 < 0) || (x0 >= WIDTH as i32 && x1 >= WIDTH as i32) ||
        (y0 < 0 && y1 < 0) || (y0 >= height as i32 && y1 >= height as i32) {
         return;
     }
-    while x >= 0 && x < w as i32 && y >= 0 && y < height as i32 {
+
+    while x >= 0 && x < WIDTH as i32 && y >= 0 && y < HEIGHT as i32 {
         for w_y in -glow_radius..=glow_radius {
             for w_x in -glow_radius..=glow_radius {
                 let distance_squared = w_x * w_x + w_y * w_y;
                 let distance = (distance_squared as f32).sqrt();
+
                 if distance > glow_radius as f32 { continue; }
+
                 let intensity = if distance <= width as f32 {
                     1.0
                 } else {
                     let falloff = 1.0 - (distance - width as f32) / (glow_radius as f32 - width as f32);
                     falloff * falloff
                 };
-                blend_pixel_safe(frame, x + w_x, y + w_y, w, height as u32, color, intensity);
+
+                blend_pixel_safe(frame, x + w_x, y + w_y, WIDTH, HEIGHT as u32, color, intensity);
             }
         }
+
         if x == x1 && y == y1 { break; }
+
         let e2 = 2 * err;
         if e2 > -dy { err -= dy; x += sx; }
         if e2 < dx { err += dx; y += sy; }
@@ -67,27 +75,33 @@ pub fn draw_line(frame: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, color: [u
 
 pub fn draw_point(frame: &mut [u8], x: i32, y: i32, color: [u8; 4], size: i32) {
     let glow_radius = size * 2;
-    let width = frame.len() / (4 * size as usize);
-    if x + glow_radius < 0 || x - glow_radius >= width as i32 || 
-       y + glow_radius < 0 || y - glow_radius >= size as i32 {
+    let _height = frame.len() / (4 * WIDTH as usize);
+
+    if x + glow_radius < 0 || x - glow_radius >= WIDTH as i32 ||
+       y + glow_radius < 0 || y - glow_radius >= HEIGHT as i32 {
         return;
     }
+
     for w_y in -glow_radius..=glow_radius {
         for w_x in -glow_radius..=glow_radius {
             let distance_squared = w_x * w_x + w_y * w_y;
             let distance = (distance_squared as f32).sqrt();
+
             if distance > glow_radius as f32 { continue; }
+
             let intensity = if distance <= size as f32 {
                 1.0
             } else {
                 let falloff = 1.0 - (distance - size as f32) / (glow_radius as f32 - size as f32);
                 falloff * falloff
             };
+
             let alpha_factor = color[3] as f32 / 255.0;
             let r = (intensity * color[0] as f32 * alpha_factor) as u8;
             let g = (intensity * color[1] as f32 * alpha_factor) as u8;
             let b = (intensity * color[2] as f32 * alpha_factor) as u8;
-            blend_pixel_safe(frame, x + w_x, y + w_y, width as u32, size as u32, [r, g, b, color[3]], 1.0);
+
+            blend_pixel_safe(frame, x + w_x, y + w_y, WIDTH, HEIGHT as u32, [r, g, b, color[3]], 1.0);
         }
     }
 }
@@ -315,4 +329,4 @@ pub fn draw_triangle_filled(
             }
         }
     }
-} 
+}

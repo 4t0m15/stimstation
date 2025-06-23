@@ -1,3 +1,8 @@
+pub mod pythagoras;
+pub mod fibonacci_spiral;
+pub mod simple_proof;
+pub mod ray_pattern;
+
 use crate::types::{Color, Position, hsv_to_rgb};
 use crate::rendering::{FrameBuffer, draw_triangle_filled, draw_text_fast, draw_circle_fast};
 
@@ -399,4 +404,4 @@ pub fn draw_particle_fountain(frame: &mut FrameBuffer, time: f32) {
             }
         }
     }
-} 
+}

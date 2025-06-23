@@ -1,15 +1,8 @@
-# Ignore build artifacts and temporary files
 /target
 **/*.rs.bk
-
-# Also ignore target directory with trailing slash
 target/
-
-# Ignore executable files
 *.exe
 *.dll
 *.pdb
-
-# Ignore OS files
 .DS_Store
 Thumbs.db

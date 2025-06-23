@@ -43,6 +43,7 @@ pub enum ActiveSide {
     Pythagoras,
     FibonacciSpiral,
     SimpleProof,
+    Combined,
 }
 
 // Line segment with optimized storage

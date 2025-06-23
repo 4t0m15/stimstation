@@ -1,8 +1,7 @@
 use pixels::Pixels;
 use winit::keyboard::KeyCode;
 use winit_input_helper::WinitInputHelper;
-use crate::ActiveSide;
-use crate::types::Color;
+use crate::types::{ActiveSide, Color};
 
 const MENU_TIMEOUT: f32 = 5.0; // Time before menu disappears
 
@@ -90,6 +89,11 @@ impl Menu {
                 name: "Simple Proof".to_string(),
                 visualization: ActiveSide::SimpleProof,
                 description: "Mathematical proof animation".to_string(),
+            },
+            MenuOption {
+                name: "Combined".to_string(),
+                visualization: ActiveSide::Combined,
+                description: "All visualizations running simultaneously".to_string(),
             },
             MenuOption {
                 name: "Full Experience".to_string(),

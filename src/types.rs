@@ -6,16 +6,11 @@ use rand::prelude::*;
 
 // Optimized color type using palette
 pub type Color = Srgb<u8>;
-pub type ColorF = Srgb<f32>;
 
 // Optimized position and velocity types using glam
 pub type Position = Vec2;
 pub type Velocity = Vec2;
-pub type Size = Vec2;
 
-// Simple types for main.rs compatibility
-pub type SimplePos = (f32, f32);
-pub type SimpleColor = [u8; 3];
 
 // Constants
 pub const WIDTH: u32 = 1600;
@@ -57,6 +52,9 @@ pub struct Line {
     pub cycle_speed: f32,
     pub cycle_offset: f32,
 }
+
+// Simple 2D position type for simple types
+pub type SimplePos = (f32, f32);
 
 // Line with simple types (from main.rs)
 #[derive(Debug)]
@@ -102,6 +100,9 @@ pub struct World {
     pub target_line_count: usize,
     pub start_time: Instant,
 }
+
+// Simple RGB color type for simple types
+pub type SimpleColor = [u8; 3];
 
 // World with simple types (from main.rs)
 #[derive(Debug)]

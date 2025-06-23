@@ -62,7 +62,10 @@ impl AudioVisualizer {
         let mut audio_data = Vec::new();
         
         unsafe {
-            if let Some(spectrum) = &AUDIO_SPECTRUM {
+            // Obtain a raw pointer to the static mutable Option
+            let spectrum_ptr: *const Option<Arc<Mutex<Vec<f32>>>> = &raw const AUDIO_SPECTRUM;
+            // Safely read the Option by dereferencing and converting to Option<&Arc<Mutex<_>>>
+            if let Some(spectrum) = (*spectrum_ptr).as_ref() {
                 if let Ok(data) = spectrum.lock() {
                     use_audio_data = true;
                     audio_data = data.clone();
@@ -223,8 +226,14 @@ pub fn analyze_audio(buffer: &[f32], spectrum: Arc<Mutex<Vec<f32>>>) {
 }
 
 // Getter for audio spectrum data
+#[allow(dead_code)]
 pub fn get_audio_spectrum() -> Option<Arc<Mutex<Vec<f32>>>> {
-    unsafe { AUDIO_SPECTRUM.clone() }
+    unsafe {
+        // Obtain raw pointer to static mutable memory
+        let ptr: *const Option<Arc<Mutex<Vec<f32>>>> = &raw const AUDIO_SPECTRUM;
+        // Clone the Option by dereferencing the raw pointer
+        (*ptr).clone()
+    }
 }
 
 // Setter for audio spectrum data

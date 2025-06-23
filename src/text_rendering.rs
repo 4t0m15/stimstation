@@ -311,13 +311,15 @@ pub fn draw_text_ab_glyph(
         
         for c in text.chars() {
             let glyph_id = font.glyph_id(c);
+            
+            // Create glyph with current position
             let glyph = Glyph {
                 id: glyph_id,
                 scale,
                 position: caret,
             };
             
-            if let Some(outlined) = font.outline_glyph(glyph.clone()) {
+            if let Some(outlined) = font.outline_glyph(glyph) {
                 outlined.draw(|gx, gy, v| {
                     let px = caret.x as i32 + gx as i32;
                     let py = (caret.y as i32 - 24) + gy as i32;
@@ -337,8 +339,11 @@ pub fn draw_text_ab_glyph(
                 });
             }
             
+            // Properly calculate horizontal advance with scaling
             let h_advance = font.h_advance_unscaled(glyph_id);
-            caret.x += h_advance * scale.x;
+            let units_per_em = font.units_per_em().unwrap_or(1000.0);
+            let scaled_advance = (h_advance / units_per_em) * scale.x;
+            caret.x += scaled_advance;
         }
     } else {
         // Fallback to simple bitmap font

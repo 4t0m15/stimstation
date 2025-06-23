@@ -1,304 +1,16 @@
-use crate::types::{World, Line, Particle, Position, Velocity, Color, VisualMode, hsv_to_rgb, WIDTH, HEIGHT, MAX_LINES};
-use crate::types::{SimpleWorld, SimpleLine, SimpleParticle, SimplePos, SimpleColor, FpsCounter, Buffers};
+use crate::types::{SimpleLine, SimpleParticle, SimpleWorld, SimplePos, SimpleColor, simple_hsv_to_rgb, VisualMode, MAX_LINES, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, Buffers};
 use crate::pixel_utils::*;
-use crate::mesmerise_circular;
-use glam::Vec2;
+use crate::{mesmerise_circular, ray_pattern, particle_fountain};
+use pixels::Pixels;
 use rand::prelude::*;
-use rayon::prelude::*;
-use std::time::{Instant, Duration};
-use std::collections::VecDeque;
+use rand::{thread_rng, Rng};
+use std::time::Instant;
 
-// Constants for simple world
-pub const SIMPLE_WIDTH: u32 = 1600;
-pub const SIMPLE_HEIGHT: u32 = 800;
-pub const SIMPLE_MAX_LINES: usize = 100;
-pub const SIMPLE_ORIGINAL_WIDTH: u32 = 800;
-pub const SIMPLE_ORIGINAL_HEIGHT: u32 = 400;
-
-// Convert HSV to RGB for simple types
-pub fn simple_hsv_to_rgb(h: f32, s: f32, v: f32) -> SimpleColor {
-    let c = v * s;
-    let x = c * (1.0 - ((h * 6.0) % 2.0 - 1.0).abs());
-    let m = v - c;
-    
-    let (r, g, b) = match (h * 6.0) as i32 {
-        0 => (c, x, 0.0),
-        1 => (x, c, 0.0),
-        2 => (0.0, c, x),
-        3 => (0.0, x, c),
-        4 => (x, 0.0, c),
-        _ => (c, 0.0, x),
-    };
-    
-    [
-        ((r + m) * 255.0) as u8,
-        ((g + m) * 255.0) as u8,
-        ((b + m) * 255.0) as u8,
-    ]
-}
-
-impl World {
-    pub fn new() -> Self {
-        let mut rng = thread_rng();
-        Self {
-            lines: (0..MAX_LINES).map(|_| Line::new(&mut rng)).collect(),
-            particles: Vec::with_capacity(500),
-            mouse_pos: None,
-            mouse_active: false,
-            background_color: Color::new(0, 0, 0),
-            mode: VisualMode::Normal,
-            target_line_count: MAX_LINES,
-            start_time: Instant::now(),
-        }
-    }
-
-    pub fn create_explosion(&mut self, pos: Position, count: usize) {
-        let mut rng = thread_rng();
-        for _ in 0..count {
-            self.particles.push(Particle::new(pos, &mut rng));
-        }
-    }
-
-    pub fn update(&mut self) {
-        let elapsed = self.start_time.elapsed().as_secs_f32();
-        
-        // Update particles in parallel
-        self.particles.par_iter_mut().for_each(|particle| {
-            particle.update(1.0 / 60.0);
-        });
-        self.particles.retain(|p| p.life > 0.0);
-        
-        // Update background color
-        let bg_hue = (elapsed * 0.02) % 1.0;
-        self.background_color = hsv_to_rgb(bg_hue, 0.5, 0.1);
-        
-        // Update lines based on mode
-        match self.mode {
-            VisualMode::Normal => self.update_normal(elapsed),
-            VisualMode::Vortex => self.update_vortex(elapsed),
-            VisualMode::Waves => self.update_waves(elapsed),
-            VisualMode::Rainbow => self.update_rainbow(elapsed),
-        }
-        
-        // Spawn new lines when mouse is active
-        if self.mouse_active && random::<f64>() < 0.1 {
-            if let Some(pos) = self.mouse_pos {
-                if self.lines.len() < MAX_LINES * 2 {
-                    let mut rng = thread_rng();
-                    let mut new_line = Line::new(&mut rng);
-                    new_line.pos[0] = pos;
-                    new_line.pos[1] = Position::new(
-                        pos.x + rng.gen_range(-new_line.length/2.0..new_line.length/2.0),
-                        pos.y + rng.gen_range(-new_line.length/2.0..new_line.length/2.0)
-                    );
-                    self.lines.push(new_line);
-                }
-            }
-        }
-        
-        // Maintain line count
-        while self.lines.len() > MAX_LINES && !self.mouse_active {
-            self.lines.remove(0);
-        }
-        
-        if !self.mouse_active {
-            if self.lines.len() < self.target_line_count && random::<f64>() < 0.1 {
-                let mut rng = thread_rng();
-                self.lines.push(Line::new(&mut rng));
-            } else if self.lines.len() > self.target_line_count && random::<f64>() < 0.1 {
-                self.lines.remove(0);
-            }
-        }
-    }
-
-    fn update_normal(&mut self, elapsed: f32) {
-        self.lines.par_iter_mut().for_each(|line| {
-            line.update(elapsed, self.mouse_pos);
-        });
-    }
-
-    fn update_vortex(&mut self, elapsed: f32) {
-        let center = self.mouse_pos.unwrap_or(Position::new(WIDTH as f32 / 2.0, HEIGHT as f32 / 2.0));
-        
-        self.lines.par_iter_mut().for_each(|line| {
-            line.update(elapsed, None);
-            
-            // Add vortex effect
-            for i in 0..2 {
-                let dx = line.pos[i].x - center.x;
-                let dy = line.pos[i].y - center.y;
-                let dist = (dx * dx + dy * dy).sqrt();
-                
-                if dist > 5.0 {
-                    let force = 300.0 / dist;
-                    let vx = -dy / dist * force;
-                    let vy = dx / dist * force;
-                    
-                    line.vel[i].x = (line.vel[i].x * 0.95 + vx * 0.05).clamp(-5.0, 5.0);
-                    line.vel[i].y = (line.vel[i].y * 0.95 + vy * 0.05).clamp(-5.0, 5.0);
-                }
-            }
-        });
-    }
-
-    fn update_waves(&mut self, elapsed: f32) {
-        let time_factor = elapsed * 2.0;
-        
-        self.lines.par_iter_mut().for_each(|line| {
-            line.update(elapsed, None);
-            
-            // Add wave effect
-            for i in 0..2 {
-                let wave_x = (line.pos[i].x / 100.0 + time_factor).sin() * 0.2;
-                let wave_y = (line.pos[i].y / 80.0 + time_factor * 0.7).cos() * 0.2;
-                
-                line.vel[i].x = (line.vel[i].x * 0.95 + wave_x).clamp(-3.0, 3.0);
-                line.vel[i].y = (line.vel[i].y * 0.95 + wave_y).clamp(-3.0, 3.0);
-            }
-        });
-    }
-
-    fn update_rainbow(&mut self, elapsed: f32) {
-        let global_hue = elapsed * 0.3 % 1.0;
-        let line_count = self.lines.len() as f32;
-        
-        self.lines.par_iter_mut().enumerate().for_each(|(i, line)| {
-            line.update(elapsed, None);
-            
-            // Set rainbow color pattern
-            let line_offset = (i as f32 / line_count) * 0.5;
-            let hue = (global_hue + line_offset) % 1.0;
-            line.color = hsv_to_rgb(hue, 0.9, 0.9);
-            
-            // Add swirling motion
-            for j in 0..2 {
-                let angle = elapsed * 0.2 + (i as f32 * 0.01);
-                let swirl_x = angle.sin() * 0.2;
-                let swirl_y = angle.cos() * 0.2;
-                
-                line.vel[j].x = (line.vel[j].x * 0.95 + swirl_x).clamp(-3.0, 3.0);
-                line.vel[j].y = (line.vel[j].y * 0.95 + swirl_y).clamp(-3.0, 3.0);
-            }
-        });
-    }
-
-    pub fn set_mouse_pos(&mut self, pos: Position) {
-        self.mouse_pos = Some(pos);
-    }
-
-    pub fn set_mouse_active(&mut self, active: bool) {
-        self.mouse_active = active;
-    }
-
-    pub fn toggle_mode(&mut self) {
-        self.mode = match self.mode {
-            VisualMode::Normal => VisualMode::Vortex,
-            VisualMode::Vortex => VisualMode::Waves,
-            VisualMode::Waves => VisualMode::Rainbow,
-            VisualMode::Rainbow => VisualMode::Normal,
-        };
-    }
-
-    pub fn add_lines(&mut self, count: usize) {
-        self.target_line_count = (self.target_line_count + count).min(MAX_LINES * 3);
-        
-        while self.lines.len() < self.target_line_count && self.lines.len() < MAX_LINES * 3 {
-            let mut rng = thread_rng();
-            self.lines.push(Line::new(&mut rng));
-        }
-    }
-
-    pub fn remove_lines(&mut self, count: usize) {
-        self.target_line_count = self.target_line_count.saturating_sub(count).max(10);
-        
-        while self.lines.len() > self.target_line_count && !self.lines.is_empty() {
-            self.lines.remove(0);
-        }
-    }
-
-    pub fn get_status(&self) -> String {
-        format!("Mesmerise - Mode: {:?} - Lines: {} - Space: change mode, +/-: lines, E: explosion, 1-4: views, Mouse: interact",
-            self.mode, self.lines.len())
-    }
-}
-
-impl Line {
-    pub fn update(&mut self, time: f32, mouse_pos: Option<Position>) {
-        // Color cycling
-        let hue = (time * self.cycle_speed + self.cycle_offset) % 1.0;
-        self.color = hsv_to_rgb(hue, 0.8, 0.9);
-        
-        // Mouse attraction
-        if let Some(mouse_pos) = mouse_pos {
-            for i in 0..2 {
-                let dist = (self.pos[i] - mouse_pos).length();
-                
-                if dist > 5.0 {
-                    let force = 40.0 / dist;
-                    let direction = (mouse_pos - self.pos[i]).normalize();
-                    let attraction = direction * force;
-                    
-                    self.vel[i] = (self.vel[i] * 0.95 + attraction * 0.05).clamp_length_max(3.0);
-                }
-            }
-        }
-        
-        // Update positions
-        for i in 0..2 {
-            self.pos[i] += self.vel[i];
-            
-            // Bounce off edges with energy loss
-            if self.pos[i].x < 0.0 || self.pos[i].x >= WIDTH as f32 {
-                self.vel[i].x *= -0.9;
-                self.pos[i].x = self.pos[i].x.clamp(0.0, WIDTH as f32 - 1.0);
-            }
-            if self.pos[i].y < 0.0 || self.pos[i].y >= HEIGHT as f32 {
-                self.vel[i].y *= -0.9;
-                self.pos[i].y = self.pos[i].y.clamp(0.0, HEIGHT as f32 - 1.0);
-            }
-        }
-        
-        // Maintain line length with spring force
-        let diff = self.pos[1] - self.pos[0];
-        let current_length = diff.length();
-        let difference = current_length - self.length;
-        
-        if current_length > 0.1 {
-            let force = difference * 0.01;
-            let direction = diff.normalize();
-            
-            self.vel[0] += direction * force;
-            self.vel[1] -= direction * force;
-        }
-        
-        // Random velocity adjustments
-        if random::<f64>() < 0.02 {
-            let mut rng = thread_rng();
-            for i in 0..2 {
-                self.vel[i].x = (self.vel[i].x + rng.gen_range(-0.15..0.15)).clamp(-3.0, 3.0);
-                self.vel[i].y = (self.vel[i].y + rng.gen_range(-0.15..0.15)).clamp(-3.0, 3.0);
-            }
-        }
-    }
-}
-
-impl Particle {
-    pub fn update(&mut self, dt: f32) {
-        // Update position
-        self.pos += self.vel;
-        
-        // Add gravity
-        self.vel.y += 0.1;
-        
-        // Reduce life
-        self.life -= dt;
-    }
-}
-
+// Simple Line implementation for main.rs compatibility
 impl SimpleLine {
     pub fn new(rng: &mut ThreadRng) -> Self {
-        let x = rng.gen_range(0.0..SIMPLE_WIDTH as f32);
-        let y = rng.gen_range(0.0..SIMPLE_HEIGHT as f32);
+        let x = rng.gen_range(0.0..WIDTH as f32);
+        let y = rng.gen_range(0.0..HEIGHT as f32);
         let speed = rng.gen_range(0.5..2.5);
         let length = rng.gen_range(30.0..120.0);
         
@@ -358,13 +70,13 @@ impl SimpleLine {
             self.pos[i].1 += self.vel[i].1;
             
             // Bounce off edges with energy loss
-            if self.pos[i].0 < 0.0 || self.pos[i].0 >= SIMPLE_WIDTH as f32 {
+            if self.pos[i].0 < 0.0 || self.pos[i].0 >= WIDTH as f32 {
                 self.vel[i].0 *= -0.9;  // 10% energy loss on bounce
-                self.pos[i].0 = self.pos[i].0.clamp(0.0, SIMPLE_WIDTH as f32 - 1.0);
+                self.pos[i].0 = self.pos[i].0.clamp(0.0, WIDTH as f32 - 1.0);
             }
-            if self.pos[i].1 < 0.0 || self.pos[i].1 >= SIMPLE_HEIGHT as f32 {
+            if self.pos[i].1 < 0.0 || self.pos[i].1 >= HEIGHT as f32 {
                 self.vel[i].1 *= -0.9;  // 10% energy loss on bounce
-                self.pos[i].1 = self.pos[i].1.clamp(0.0, SIMPLE_HEIGHT as f32 - 1.0);
+                self.pos[i].1 = self.pos[i].1.clamp(0.0, HEIGHT as f32 - 1.0);
             }
         }
         
@@ -387,7 +99,7 @@ impl SimpleLine {
         }
         
         // Occasionally change velocity with small random adjustments
-        if rng.gen::<f64>() < 0.02 {
+        if rng.gen_bool(0.02) {
             for i in 0..2 {
                 self.vel[i].0 = (self.vel[i].0 + rng.gen_range(-0.15..0.15)).clamp(-3.0, 3.0);
                 self.vel[i].1 = (self.vel[i].1 + rng.gen_range(-0.15..0.15)).clamp(-3.0, 3.0);
@@ -396,6 +108,7 @@ impl SimpleLine {
     }
 }
 
+// Simple Particle implementation for main.rs compatibility
 impl SimpleParticle {
     pub fn new(x: f32, y: f32, rng: &mut impl Rng) -> Self {
         let speed = rng.gen_range(1.0..5.0);
@@ -426,11 +139,12 @@ impl SimpleParticle {
     }
 }
 
+// Simple World implementation for main.rs compatibility
 impl SimpleWorld {
     pub fn new() -> Self {
         let mut rng = thread_rng();
         Self {
-            lines: (0..SIMPLE_MAX_LINES).map(|_| SimpleLine::new(&mut rng)).collect(),
+            lines: (0..MAX_LINES).map(|_| SimpleLine::new(&mut rng)).collect(),
             rng,
             start_time: Instant::now(),
             mouse_pos: None,
@@ -438,7 +152,7 @@ impl SimpleWorld {
             background_color: [0, 0, 0],
             mode: VisualMode::Normal,
             particles: Vec::with_capacity(500),
-            target_line_count: SIMPLE_MAX_LINES,
+            target_line_count: MAX_LINES,
         }
     }
     
@@ -469,7 +183,7 @@ impl SimpleWorld {
             },
             VisualMode::Vortex => {
                 // Create a vortex effect around the center or mouse
-                let center = self.mouse_pos.unwrap_or((SIMPLE_WIDTH as f32 / 2.0, SIMPLE_HEIGHT as f32 / 2.0));
+                let center = self.mouse_pos.unwrap_or((WIDTH as f32 / 2.0, HEIGHT as f32 / 2.0));
                 
                 for line in &mut self.lines {
                     // First update normally
@@ -540,9 +254,9 @@ impl SimpleWorld {
         }
         
         // Spawn new lines when mouse button is held
-        if self.mouse_active && self.rng.gen::<f64>() < 0.1 {
+        if self.mouse_active && self.rng.gen_bool(0.1) {
             if let Some((x, y)) = self.mouse_pos {
-                if self.lines.len() < SIMPLE_MAX_LINES * 2 {
+                if self.lines.len() < MAX_LINES * 2 {
                     let mut new_line = SimpleLine::new(&mut self.rng);
                     new_line.pos[0] = (x, y);
                     new_line.pos[1] = (
@@ -555,15 +269,15 @@ impl SimpleWorld {
         }
         
         // Maintain a reasonable number of lines
-        while self.lines.len() > SIMPLE_MAX_LINES && !self.mouse_active {
+        while self.lines.len() > MAX_LINES && !self.mouse_active {
             self.lines.remove(0);
         }
         
         // Maintain line count target (slowly adjust)
         if !self.mouse_active {
-            if self.lines.len() < self.target_line_count && self.rng.gen::<f64>() < 0.1 {
+            if self.lines.len() < self.target_line_count && self.rng.gen_bool(0.1) {
                 self.lines.push(SimpleLine::new(&mut self.rng));
-            } else if self.lines.len() > self.target_line_count && self.rng.gen::<f64>() < 0.1 {
+            } else if self.lines.len() > self.target_line_count && self.rng.gen_bool(0.1) {
                 self.lines.remove(0);
             }
         }
@@ -637,10 +351,10 @@ impl SimpleWorld {
     }
     
     pub fn add_lines(&mut self, count: usize) {
-        self.target_line_count = (self.target_line_count + count).min(SIMPLE_MAX_LINES * 3);
+        self.target_line_count = (self.target_line_count + count).min(MAX_LINES * 3);
         
         // Immediately add some lines to reach target
-        while self.lines.len() < self.target_line_count && self.lines.len() < SIMPLE_MAX_LINES * 3 {
+        while self.lines.len() < self.target_line_count && self.lines.len() < MAX_LINES * 3 {
             self.lines.push(SimpleLine::new(&mut self.rng));
         }
     }
@@ -661,48 +375,226 @@ impl SimpleWorld {
     }
 }
 
-impl FpsCounter {
-    pub fn new() -> Self {
-        Self {
-            frame_times: VecDeque::with_capacity(100),
-            last_update: Instant::now(),
-            current_fps: 0.0,
-            update_interval: Duration::from_millis(500), // Update FPS display every 500ms
-        }
+// Bresenham's line algorithm with thickness and glow effect - Improved with safe pixel operations
+pub fn draw_line(frame: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4], width: i32) {
+    let dx = (x1 - x0).abs();
+    let dy = (y1 - y0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx - dy;
+    let mut x = x0;
+    let mut y = y0;
+    let glow_radius = width * 3;
+    let height = frame.len() / (4 * WIDTH as usize);
+    
+    if (x0 < 0 && x1 < 0) || (x0 >= WIDTH as i32 && x1 >= WIDTH as i32) ||
+       (y0 < 0 && y1 < 0) || (y0 >= height as i32 && y1 >= height as i32) {
+        return;
     }
 
-    pub fn update(&mut self) {
-        let now = Instant::now();
-        self.frame_times.push_back(now);
-
-        // Remove frames older than 1 second
-        while !self.frame_times.is_empty() && now.duration_since(*self.frame_times.front().unwrap()).as_secs_f32() > 1.0 {
-            self.frame_times.pop_front();
+    while x >= 0 && x < WIDTH as i32 && y >= 0 && y < HEIGHT as i32 {
+        for w_y in -glow_radius..=glow_radius {
+            for w_x in -glow_radius..=glow_radius {
+                let distance_squared = w_x * w_x + w_y * w_y;
+                let distance = (distance_squared as f32).sqrt();
+                
+                if distance > glow_radius as f32 { continue; }
+                
+                let intensity = if distance <= width as f32 {
+                    1.0
+                } else {
+                    let falloff = 1.0 - (distance - width as f32) / (glow_radius as f32 - width as f32);
+                    falloff * falloff
+                };
+                
+                blend_pixel_safe(frame, x + w_x, y + w_y, WIDTH, HEIGHT as u32, color, intensity);
+            }
         }
 
-        // Update the FPS calculation every update_interval
-        if now.duration_since(self.last_update) >= self.update_interval {
-            self.current_fps = self.frame_times.len() as f32;
-            self.last_update = now;
-        }
-    }
+        if x == x1 && y == y1 { break; }
 
-    pub fn fps(&self) -> f32 {
-        self.current_fps
+        let e2 = 2 * err;
+        if e2 > -dy { err -= dy; x += sx; }
+        if e2 < dx { err += dx; y += sy; }
     }
 }
 
-impl Buffers {
-    pub fn new() -> Self {
-        let original = vec![0u8; 4 * SIMPLE_ORIGINAL_WIDTH as usize * SIMPLE_ORIGINAL_HEIGHT as usize];
-        let circular = vec![0u8; 4 * mesmerise_circular::WIDTH as usize * mesmerise_circular::HEIGHT as usize];
-        let full = vec![0u8; 4 * SIMPLE_WIDTH as usize * SIMPLE_HEIGHT as usize];
-        Self { original, circular, full }
+// Helper function to draw a glowing point with improved safety
+pub fn draw_point(frame: &mut [u8], x: i32, y: i32, color: [u8; 4], size: i32) {
+    let glow_radius = size * 2;
+    let _height = frame.len() / (4 * WIDTH as usize);
+    
+    if x + glow_radius < 0 || x - glow_radius >= WIDTH as i32 || 
+       y + glow_radius < 0 || y - glow_radius >= HEIGHT as i32 {
+        return;
     }
     
-    pub fn clear(&mut self) {
-        self.original.fill(0);
-        self.circular.fill(0);
-        self.full.fill(0);
+    for w_y in -glow_radius..=glow_radius {
+        for w_x in -glow_radius..=glow_radius {
+            let distance_squared = w_x * w_x + w_y * w_y;
+            let distance = (distance_squared as f32).sqrt();
+            
+            if distance > glow_radius as f32 { continue; }
+            
+            let intensity = if distance <= size as f32 {
+                1.0
+            } else {
+                let falloff = 1.0 - (distance - size as f32) / (glow_radius as f32 - size as f32);
+                falloff * falloff
+            };
+            
+            let alpha_factor = color[3] as f32 / 255.0;
+            let r = (intensity * color[0] as f32 * alpha_factor) as u8;
+            let g = (intensity * color[1] as f32 * alpha_factor) as u8;
+            let b = (intensity * color[2] as f32 * alpha_factor) as u8;
+            
+            blend_pixel_safe(frame, x + w_x, y + w_y, WIDTH, HEIGHT as u32, [r, g, b, color[3]], 1.0);
+        }
     }
+}
+
+// Drawing functions for different modes
+pub fn draw_original_with_buffer(pixels: &mut Pixels, world: &SimpleWorld, buffer: &mut Vec<u8>) {
+    // Manually draw the world to the buffer
+    draw_world_to_buffer(world, buffer);
+    let frame = pixels.frame_mut();
+    for y in 0..ORIGINAL_HEIGHT as usize {
+        for x in 0..ORIGINAL_WIDTH as usize {
+            let src_idx = 4 * (y * ORIGINAL_WIDTH as usize + x);
+            let dst_idx = 4 * (y * WIDTH as usize + x);
+            if src_idx + 3 < buffer.len() && dst_idx + 3 < frame.len() {
+                frame[dst_idx] = buffer[src_idx];
+                frame[dst_idx + 1] = buffer[src_idx + 1];
+                frame[dst_idx + 2] = buffer[src_idx + 2];
+                frame[dst_idx + 3] = buffer[src_idx + 3];
+            }
+        }
+    }
+}
+
+// Helper function to draw the world to a buffer
+fn draw_world_to_buffer(world: &SimpleWorld, frame: &mut [u8]) {
+    // Check if we need trails effect (for Rainbow mode)
+    let use_trails = world.mode == VisualMode::Rainbow;
+    
+    if use_trails {
+        // Fade the previous frame
+        frame.chunks_exact_mut(4).for_each(|pixel| {
+            pixel[0] = (pixel[0] as f32 * 0.85) as u8;
+            pixel[1] = (pixel[1] as f32 * 0.85) as u8;
+            pixel[2] = (pixel[2] as f32 * 0.85) as u8;
+            pixel[3] = 255;
+        });
+    } else {
+        // Set background with custom color
+        frame.chunks_exact_mut(4).for_each(|pixel| {
+            pixel[0] = world.background_color[0];
+            pixel[1] = world.background_color[1];
+            pixel[2] = world.background_color[2];
+            pixel[3] = 255;
+        });
+    }
+    
+    // Draw all lines
+    for line in &world.lines {
+        draw_line(
+            frame, 
+            line.pos[0].0 as i32, line.pos[0].1 as i32, 
+            line.pos[1].0 as i32, line.pos[1].1 as i32, 
+            [line.color[0], line.color[1], line.color[2], 255], 
+            line.width as i32
+        );
+    }
+    
+    // Draw all particles
+    for particle in &world.particles {
+        let alpha = ((particle.life / 1.5) * 255.0) as u8;
+        draw_point(
+            frame,
+            particle.pos.0 as i32,
+            particle.pos.1 as i32,
+            [particle.color[0], particle.color[1], particle.color[2], alpha],
+            particle.size as i32
+        );
+    }
+}
+
+pub fn draw_circular_with_buffer(pixels: &mut Pixels, time: f32, buffer: &mut Vec<u8>) {
+    mesmerise_circular::draw_frame(buffer, time);
+    let frame = pixels.frame_mut();
+    let x_offset = ORIGINAL_WIDTH as usize;
+    let circular_width = mesmerise_circular::WIDTH as usize;
+    let circular_height = mesmerise_circular::HEIGHT as usize;
+    for y in 0..circular_height {
+        for x in 0..circular_width {
+            let src_idx = 4 * (y * circular_width + x);
+            let dst_idx = 4 * (y * WIDTH as usize + (x + x_offset));
+            if src_idx + 3 < buffer.len() && dst_idx + 3 < frame.len() {
+                frame[dst_idx] = buffer[src_idx];
+                frame[dst_idx + 1] = buffer[src_idx + 1];
+                frame[dst_idx + 2] = buffer[src_idx + 2];
+                frame[dst_idx + 3] = buffer[src_idx + 3];
+            }
+        }
+    }
+}
+
+pub fn draw_full_screen_with_buffer(pixels: &mut Pixels, world: &SimpleWorld, time: f32, buffers: &mut Buffers) {
+    let frame = pixels.frame_mut();
+    // Original visualization (top-left)
+    draw_world_to_buffer(world, &mut buffers.original);
+    for y in 0..ORIGINAL_HEIGHT as usize {
+        for x in 0..ORIGINAL_WIDTH as usize {
+            let src_idx = 4 * (y * ORIGINAL_WIDTH as usize + x);
+            let dst_idx = 4 * (y * WIDTH as usize + x);
+            if src_idx + 3 < buffers.original.len() && dst_idx + 3 < frame.len() {
+                frame[dst_idx] = buffers.original[src_idx];
+                frame[dst_idx + 1] = buffers.original[src_idx + 1];
+                frame[dst_idx + 2] = buffers.original[src_idx + 2];
+                frame[dst_idx + 3] = buffers.original[src_idx + 3];
+            }
+        }
+    }
+    // Circular visualization (top-right)
+    mesmerise_circular::draw_frame(&mut buffers.circular, time);
+    let x_offset = ORIGINAL_WIDTH as usize;
+    let circular_width = mesmerise_circular::WIDTH as usize;
+    let circular_height = mesmerise_circular::HEIGHT as usize;
+    for y in 0..circular_height {
+        for x in 0..circular_width {
+            let src_idx = 4 * (y * circular_width + x);
+            let dst_idx = 4 * (y * WIDTH as usize + (x + x_offset));
+            if src_idx + 3 < buffers.circular.len() && dst_idx + 3 < frame.len() {
+                frame[dst_idx] = buffers.circular[src_idx];
+                frame[dst_idx + 1] = buffers.circular[src_idx + 1];
+                frame[dst_idx + 2] = buffers.circular[src_idx + 2];
+                frame[dst_idx + 3] = buffers.circular[src_idx + 3];
+            }
+        }
+    }
+    // Particle fountain (bottom-left)
+    particle_fountain::draw_frame(frame, WIDTH, HEIGHT, time);
+    // Ray pattern visualization (bottom-right)
+    let ray_width = ORIGINAL_WIDTH;
+    let ray_height = ORIGINAL_HEIGHT;
+    let y_offset = ORIGINAL_HEIGHT as usize;
+    let ray_frame = &mut frame[(y_offset * WIDTH as usize * 4)..];
+    ray_pattern::draw_frame(ray_frame, ray_width, ray_height, time, x_offset, WIDTH);
+}
+
+// Draw the ray pattern visualization on the full screen
+pub fn draw_ray_pattern(pixels: &mut Pixels, time: f32) {
+    // Clear to black first
+    for pixel in pixels.frame_mut().chunks_exact_mut(4) {
+        pixel[0] = 0; // R
+        pixel[1] = 0; // G
+        pixel[2] = 0; // B
+        pixel[3] = 255; // A
+    }
+    
+    let frame = pixels.frame_mut();
+    
+    // Draw the ray pattern directly to the frame buffer using the full width and height
+    // Use the actual WIDTH and HEIGHT for ray pattern to fill the entire buffer
+    ray_pattern::draw_frame(frame, WIDTH, HEIGHT, time, 0, WIDTH);
 }

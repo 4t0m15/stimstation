@@ -3,19 +3,11 @@ use ab_glyph::{Font as _, FontArc, Glyph, PxScale};
 use font_kit::{source::SystemSource, properties::Properties};
 use once_cell::sync::Lazy;
 use rand::prelude::*;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use rodio::{OutputStream, Sink, Source};
-use std::time::Duration;
 use winit::monitor::MonitorHandle;
+use crate::audio_handler::AudioVisualizer;
+use crate::audio_playback::{start_audio_thread, is_audio_thread_started};
 
 const RAY_COUNT: usize = 60;  // Number of rays for each source
-
-// Audio visualizer settings
-const AUDIO_VIZ_BARS: usize = 32;
-const AUDIO_VIZ_BASE_HEIGHT: f32 = 60.0;  // Base height for 1080p screen
-const AUDIO_VIZ_MIN_HEIGHT: f32 = 5.0;    // Minimum height for bars
-const AUDIO_VIZ_DECAY_RATE: f32 = 2.0;    // How quickly the bars react to changes
 
 // Sorting visualization data
 const SORT_ARRAY_SIZE: usize = 200; // A more reasonable size that won't cause overflow
@@ -286,344 +278,14 @@ impl SortVisualizer {
     }
 }
 
-// Audio visualizer state
-struct AudioVisualizer {
-    spectrum: Vec<f32>,
-    target_heights: Vec<f32>,
-    current_heights: Vec<f32>,
-    last_update: f32,
-}
-
-impl AudioVisualizer {
-    fn new() -> Self {
-        let mut spectrum = Vec::with_capacity(AUDIO_VIZ_BARS);
-        let mut target_heights = Vec::with_capacity(AUDIO_VIZ_BARS);
-        let mut current_heights = Vec::with_capacity(AUDIO_VIZ_BARS);
-        
-        for _ in 0..AUDIO_VIZ_BARS {
-            spectrum.push(0.0);
-            target_heights.push(0.0);
-            current_heights.push(0.0);
-        }
-        
-        Self {
-            spectrum,
-            target_heights,
-            current_heights,
-            last_update: 0.0,
-        }
-    }
-    
-    fn update(&mut self, time: f32) {
-        let dt = if self.last_update > 0.0 {
-            (time - self.last_update).min(0.1)
-        } else {
-            0.016
-        };
-        self.last_update = time;
-        
-        // Get the scaled height based on monitor dimensions
-        let scaled_height = unsafe {
-            match MONITOR_HEIGHT {
-                Some(m_height) => {
-                    // Scale the height based on screen height
-                    let scale_factor = m_height as f32 / 1080.0; // 1080p reference
-                    AUDIO_VIZ_BASE_HEIGHT * scale_factor
-                },
-                None => AUDIO_VIZ_BASE_HEIGHT // Default if no monitor dimensions
-            }
-        };
-        
-        // Check if we have audio spectrum data
-        let mut use_audio_data = false;
-        let mut audio_data = Vec::new();
-        
-        unsafe {
-            if let Some(spectrum) = &AUDIO_SPECTRUM {
-                if let Ok(data) = spectrum.lock() {
-                    use_audio_data = true;
-                    audio_data = data.clone();
-                }
-            }
-        }
-        
-        for i in 0..AUDIO_VIZ_BARS {
-            let target_height;
-            
-            if use_audio_data && i < audio_data.len() {
-                // Use real audio data
-                let audio_value = audio_data[i];
-                target_height = AUDIO_VIZ_MIN_HEIGHT + audio_value * (scaled_height - AUDIO_VIZ_MIN_HEIGHT);
-            } else {
-                // Fallback to simulated data
-                let time_phase = time * 0.5;
-                let pos_factor = i as f32 / AUDIO_VIZ_BARS as f32;
-                let freq_factor = (pos_factor * 10.0).sin() * 0.5 + 0.5;
-                let time_factor = ((time_phase + pos_factor * 5.0).sin() * 0.5 + 0.5).powf(2.0);
-                
-                // Add some randomness for natural appearance
-                let noise = rand::thread_rng().gen_range(0.0..0.2);
-                
-                // Calculate the target height for this bar
-                let height_factor = time_factor * freq_factor + noise;
-                target_height = AUDIO_VIZ_MIN_HEIGHT + height_factor * (scaled_height - AUDIO_VIZ_MIN_HEIGHT);
-            }
-            
-            self.target_heights[i] = target_height;
-            
-            // Smoothly approach the target height
-            let diff = self.target_heights[i] - self.current_heights[i];
-            self.current_heights[i] += diff * (1.0 - (-dt * AUDIO_VIZ_DECAY_RATE).exp());
-            
-            // Store in spectrum for visualization (normalized)
-            self.spectrum[i] = self.current_heights[i] / scaled_height;
-        }
-    }
-    
-    fn draw(&self, frame: &mut [u8], width: u32, height: u32, x_offset: usize, buffer_width: u32) {
-        let bar_width = width as usize / AUDIO_VIZ_BARS;
-        let y_baseline = height as usize - 50;
-        
-        let time = 0.1;
-        
-        for i in 0..AUDIO_VIZ_BARS {
-            let bar_height = (self.current_heights[i] * (height as f32 / 200.0)).max(AUDIO_VIZ_MIN_HEIGHT) as usize;
-            let x_start = i * bar_width;
-            
-            let mut rng = thread_rng();
-            let noise = rng.gen_range(0.0..0.2);
-            let hue = (i as f32 / AUDIO_VIZ_BARS as f32 + time * 0.1 + noise) % 1.0;
-            let color = hsv_to_rgb(hue, 0.9, 1.0);
-            
-            self.draw_glow(frame, width, height, x_start, y_baseline, bar_width, bar_height, &color, x_offset, buffer_width);
-        }
-    }
-    
-    fn draw_glow(&self, frame: &mut [u8], width: u32, height: u32, 
-                x_start: usize, y_baseline: usize, bar_width: usize, bar_height: usize, 
-                color: &[u8; 3], x_offset: usize, buffer_width: u32) {
-        // Draw a subtle glow effect around each bar
-        let glow_radius = 2;
-        let glow_color = [color[0], color[1], color[2], 80]; // Semi-transparent
-        
-        for dy in -glow_radius..=glow_radius {
-            for dx in -glow_radius..=glow_radius {
-                // Skip the bar itself
-                if dx == 0 && dy == 0 {
-                    continue;
-                }
-                
-                let distance_sq = dx * dx + dy * dy;
-                if distance_sq <= glow_radius * glow_radius {
-                    // Calculate alpha based on distance
-                    let alpha = (1.0 - (distance_sq as f32 / (glow_radius * glow_radius) as f32).sqrt()) * 80.0;
-                    let glow_alpha = [glow_color[0], glow_color[1], glow_color[2], alpha as u8];
-                    
-                    // Draw glow on top edge (carefully avoiding overflow)
-                    if bar_height <= y_baseline {
-                        let y_top = y_baseline - bar_height;
-                        for x in 0..bar_width {
-                            let x_pos = x_start + x;
-                            let x_glow = (x_pos as i32 + dx).max(0).min(width as i32 - 1);
-                            let y_glow = (y_top as i32 + dy).max(0).min(height as i32 - 1);
-                            
-                            put_pixel(frame, width, height, x_glow, y_glow, &glow_alpha, x_offset, buffer_width);
-                        }
-                    }
-                    
-                    // Draw glow on sides of the bar
-                    for y in 0..bar_height {
-                        // Left side glow
-                        let x_glow_left = (x_start as i32 + dx).max(0).min(width as i32 - 1);
-                        let y_glow = (y_baseline as i32 - y as i32 + dy).max(0).min(height as i32 - 1);
-                        put_pixel(frame, width, height, x_glow_left, y_glow, &glow_alpha, x_offset, buffer_width);
-                        
-                        // Right side glow
-                        let x_glow_right = (x_start as i32 + bar_width as i32 - 1 + dx).max(0).min(width as i32 - 1);
-                        put_pixel(frame, width, height, x_glow_right, y_glow, &glow_alpha, x_offset, buffer_width);
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Static instance of audio visualizer
-static mut AUDIO_VISUALIZER: Option<AudioVisualizer> = None;
-
-// Audio spectrum data shared between audio thread and visualization
-static mut AUDIO_SPECTRUM: Option<Arc<Mutex<Vec<f32>>>> = None;
+// Static instance of audio visualizer (using external module)
+static mut AUDIO_VISUALIZER: Option<crate::audio_handler::AudioVisualizer> = None;
 
 // Static instances for sorting visualizers
 static mut TOP_SORTER: Option<SortVisualizer> = None;
 static mut BOTTOM_SORTER: Option<SortVisualizer> = None;
 static mut LEFT_SORTER: Option<SortVisualizer> = None;
 static mut RIGHT_SORTER: Option<SortVisualizer> = None;
-
-// White noise generator for rodio
-struct NoiseSource {
-    sample_rate: u32,
-    position: usize,
-    amplitude: f32,
-}
-
-impl NoiseSource {
-    fn new(sample_rate: u32) -> Self {
-        Self {
-            sample_rate,
-            position: 0,
-            amplitude: 0.25, // 25% volume to avoid being too loud
-        }
-    }
-}
-
-impl Iterator for NoiseSource {
-    type Item = f32;
-    
-    fn next(&mut self) -> Option<f32> {
-        self.position += 1;
-        let mut rng = rand::thread_rng();
-        let noise = rng.gen_range(-1.0..1.0) * self.amplitude;
-        Some(noise)
-    }
-}
-
-impl Source for NoiseSource {
-    fn current_frame_len(&self) -> Option<usize> {
-        None
-    }
-    
-    fn channels(&self) -> u16 {
-        1 // Mono
-    }
-    
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-    
-    fn total_duration(&self) -> Option<Duration> {
-        None // Infinite
-    }
-}
-
-// Start audio playback and analysis
-fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
-    // Initialize the audio spectrum data
-    let audio_spectrum = Arc::new(Mutex::new(vec![0.0; AUDIO_VIZ_BARS]));
-    
-    // Store it in the static variable
-    unsafe {
-        AUDIO_SPECTRUM = Some(audio_spectrum.clone());
-    }
-    
-    // Create a thread for audio playback and analysis
-    let handle = thread::spawn(move || {
-        // Try to get the output stream
-        let (_stream, stream_handle) = match OutputStream::try_default() {
-            Ok(result) => result,
-            Err(e) => {
-                eprintln!("Failed to get audio output stream: {}", e);
-                return;
-            }
-        };
-        
-        // Create a sink to play our audio
-        let sink = match Sink::try_new(&stream_handle) {
-            Ok(sink) => sink,
-            Err(e) => {
-                eprintln!("Failed to create audio sink: {}", e);
-                return;
-            }
-        };
-        
-        // Create our noise source
-        let sample_rate = 44100;
-        let noise = NoiseSource::new(sample_rate);
-        
-        // Set up a buffer to analyze
-        let buffer_size = 1024;
-        let mut audio_buffer = vec![0.0; buffer_size];
-        let mut buffer_pos = 0;
-        
-        // Add the noise source to the sink
-        sink.append(noise);
-        
-        // Keep the sink playing and analyze audio
-        while !sink.empty() {
-            // Sleep a bit to avoid hogging the CPU
-            thread::sleep(Duration::from_millis(10));
-            
-            // Simulate audio capture and analysis
-            for _ in 0..buffer_size/10 {  // Process some samples each time
-                // Generate a new sample (similar to our noise source)
-                let noise = rand::thread_rng().gen_range(-1.0..1.0) * 0.25;
-                
-                // Add to buffer
-                audio_buffer[buffer_pos] = noise;
-                buffer_pos = (buffer_pos + 1) % buffer_size;
-                
-                // Every time we fill the buffer, analyze it
-                if buffer_pos == 0 {
-                    analyze_audio(&audio_buffer, audio_spectrum.clone());
-                }
-            }
-        }
-    });
-    
-    Some(handle)
-}
-
-// Simple audio analysis function
-fn analyze_audio(buffer: &[f32], spectrum: Arc<Mutex<Vec<f32>>>) {
-    // Very simple "spectrum" analysis - we'll divide the buffer into frequency bands
-    // In a real implementation, you'd use FFT for proper spectrum analysis
-    
-    let mut spectrum_data = spectrum.lock().unwrap();
-    let num_bands = spectrum_data.len();
-    
-    // For each frequency band
-    for i in 0..num_bands {
-        // Calculate the range of samples for this band
-        // (we're just dividing the buffer into equal parts)
-        let start = (i * buffer.len()) / num_bands;
-        let end = ((i + 1) * buffer.len()) / num_bands;
-        
-        // Calculate the energy (sum of squared amplitudes) in this band
-        let mut energy = 0.0;
-        for j in start..end {
-            energy += buffer[j] * buffer[j];
-        }
-        
-        // Normalize by the number of samples
-        if end > start {
-            energy /= (end - start) as f32;
-        }
-        
-        // Apply some scaling to make it visually interesting
-        let scaled_energy = energy.sqrt() * 4.0;
-        
-        // Add some randomness for more interesting visualization
-        let noise = rand::thread_rng().gen_range(0.0..0.2);
-        
-        // Update the spectrum with smoothing
-        spectrum_data[i] = spectrum_data[i] * 0.7 + (scaled_energy + noise) * 0.3;
-    }
-    
-    // Apply some additional processing for visual interest
-    
-    // 1. Bass boost (lower frequencies)
-    let bass_boost = 1.5;
-    let bass_range = num_bands / 4;
-    for i in 0..bass_range {
-        let factor = 1.0 + bass_boost * (1.0 - i as f32 / bass_range as f32);
-        spectrum_data[i] *= factor;
-    }
-    
-    // 2. Ensure minimum and maximum levels for visual interest
-    for value in spectrum_data.iter_mut() {
-        *value = value.max(0.05).min(1.0);
-    }
-}
 
 // HSV to RGB conversion helper for colorful visualization
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
@@ -665,7 +327,6 @@ struct TextFragment {
 
 static mut TEXT_FRAGMENTS: Option<Vec<TextFragment>> = None;
 static mut NEXT_FRAGMENT_TIME: Option<f32> = None;
-static mut AUDIO_THREAD_STARTED: bool = false;
 static mut MONITOR_WIDTH: Option<u32> = None;
 static mut MONITOR_HEIGHT: Option<u32> = None;
 
@@ -720,10 +381,9 @@ pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset
         }
         
         // Start audio thread if it hasn't been started yet
-        if !AUDIO_THREAD_STARTED {
+        if !is_audio_thread_started() {
             // Start the audio thread for noise generation and analysis
             if let Some(_handle) = start_audio_thread() {
-                AUDIO_THREAD_STARTED = true;
                 println!("Audio thread started successfully");
             }
         }
@@ -1031,7 +691,8 @@ pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset
         
         // Update and draw the audio visualizer
         if let Some(audio_viz) = AUDIO_VISUALIZER.as_mut() {
-            audio_viz.update(time);
+            let monitor_height = unsafe { MONITOR_HEIGHT };
+            audio_viz.update(time, monitor_height);
             audio_viz.draw(frame, width, height, x_offset, buffer_width);
         }
         

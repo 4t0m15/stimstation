@@ -1,21 +1,38 @@
 use pixels::{Error, Pixels, SurfaceTexture};
-use rand::prelude::*;
-use rand::thread_rng;
 use std::sync::Arc;
 use winit::{
-	dpi::LogicalSize,
-	event::{MouseButton},
-	keyboard::KeyCode,
-	event_loop::EventLoop,
-	window::{WindowBuilder},
+    dpi::LogicalSize,
+    event::{MouseButton},
+    keyboard::KeyCode,
+    event_loop::EventLoop,
+    window::{WindowBuilder},
 };
 use winit_input_helper::WinitInputHelper;
 use std::time::{Duration, Instant};
-use std::collections::VecDeque;
 
-// Import our circular visuals implementation
+// Import our modules
+mod types;
+mod world;
+mod rendering;
+mod visualizations;
 mod mesmerise_circular;
 mod ray_pattern;
+mod audio_handler;
+mod audio_playback;
+mod pythagoras;
+mod fibonacci_spiral;
+mod simple_proof;
+mod particle_fountain;
+mod pixel_utils;
+mod app;
+mod text_rendering;
+
+// Import only what we actually need
+use rand::rngs::ThreadRng;
+use rand::Rng;
+use rand::thread_rng;
+use crate::pixel_utils::blend_pixel_safe;
+use crate::types::{FpsCounter, Buffers};
 
 // Combined window dimensions
 const WIDTH: u32 = 1600;
@@ -232,66 +249,9 @@ enum VisualMode {
 	Rainbow,  // New rainbow mode
 }
 
-// Add a struct to track FPS
-struct FpsCounter {
-	frame_times: VecDeque<Instant>,
-	last_update: Instant,
-	current_fps: f32,
-	update_interval: Duration,
-}
+// Using FpsCounter from types.rs
 
-impl FpsCounter {
-	fn new() -> Self {
-		Self {
-			frame_times: VecDeque::with_capacity(100),
-			last_update: Instant::now(),
-			current_fps: 0.0,
-			update_interval: Duration::from_millis(500), // Update FPS display every 500ms
-		}
-	}
-
-	fn update(&mut self) {
-		let now = Instant::now();
-		self.frame_times.push_back(now);
-
-		// Remove frames older than 1 second
-		while !self.frame_times.is_empty() && now.duration_since(*self.frame_times.front().unwrap()).as_secs_f32() > 1.0 {
-			self.frame_times.pop_front();
-		}
-
-		// Update the FPS calculation every update_interval
-		if now.duration_since(self.last_update) >= self.update_interval {
-			self.current_fps = self.frame_times.len() as f32;
-			self.last_update = now;
-		}
-	}
-
-	fn fps(&self) -> f32 {
-		self.current_fps
-	}
-}
-
-// Add Buffers struct for persistent region buffers
-struct Buffers {
-    original: Vec<u8>,
-    circular: Vec<u8>,
-    full: Vec<u8>,
-    // Add more as needed for other regions
-}
-
-impl Buffers {
-    fn new() -> Self {
-        let original = vec![0u8; 4 * ORIGINAL_WIDTH as usize * ORIGINAL_HEIGHT as usize];
-        let circular = vec![0u8; 4 * mesmerise_circular::WIDTH as usize * mesmerise_circular::HEIGHT as usize];
-        let full = vec![0u8; 4 * WIDTH as usize * HEIGHT as usize];
-        Self { original, circular, full }
-    }
-    fn clear(&mut self) {
-        self.original.fill(0);
-        self.circular.fill(0);
-        self.full.fill(0);
-    }
-}
+// Using Buffers from types.rs
 
 impl World {
 	fn new() -> Self {
@@ -575,7 +535,7 @@ fn draw_line(frame: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4
 // Helper function to draw a glowing point with improved safety
 fn draw_point(frame: &mut [u8], x: i32, y: i32, color: [u8; 4], size: i32) {
 	let glow_radius = size * 2;
-	let height = frame.len() / (4 * WIDTH as usize);
+	let _height = frame.len() / (4 * WIDTH as usize);
 	
 	if x + glow_radius < 0 || x - glow_radius >= WIDTH as i32 || 
 	   y + glow_radius < 0 || y - glow_radius >= HEIGHT as i32 {
@@ -604,46 +564,6 @@ fn draw_point(frame: &mut [u8], x: i32, y: i32, color: [u8; 4], size: i32) {
 			blend_pixel_safe(frame, x + w_x, y + w_y, WIDTH, HEIGHT as u32, [r, g, b, color[3]], 1.0);
 		}
 	}
-}
-
-// Helper function to draw a filled circle with improved safety
-fn draw_circle(frame: &mut [u8], x: i32, y: i32, radius: i32, color: [u8; 4], width: u32) {
-	let height = frame.len() / (4 * width as usize);
-	
-	// Early culling - skip if entirely off-screen
-	if x + radius < 0 || x - radius >= width as i32 || 
-	   y + radius < 0 || y - radius >= height as i32 {
-		return;
-	}
-	
-	// Use squared distance for performance
-	let radius_sq = radius * radius;
-	
-	for dy in -radius..=radius {
-		for dx in -radius..=radius {
-			if dx*dx + dy*dy <= radius_sq {
-				// Use our safe pixel setter
-				set_pixel_safe(frame, x + dx, y + dy, width, height as u32, color);
-			}
-		}
-	}
-}
-
-// Helper function for additive blending with bounds checking
-fn blend_pixel_safe(frame: &mut [u8], x: i32, y: i32, width: u32, height: u32, color: [u8; 4], intensity: f32) {
-    if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
-        let idx = 4 * (y as usize * width as usize + x as usize);
-        if idx + 3 < frame.len() {
-            let r = (intensity * color[0] as f32) as u16;
-            let g = (intensity * color[1] as f32) as u16;
-            let b = (intensity * color[2] as f32) as u16;
-            
-            frame[idx] = (frame[idx] as u16 + r).min(255) as u8;
-            frame[idx + 1] = (frame[idx + 1] as u16 + g).min(255) as u8;
-            frame[idx + 2] = (frame[idx + 2] as u16 + b).min(255) as u8;
-            frame[idx + 3] = color[3];
-        }
-    }
 }
 
 fn main() -> Result<(), Error> {
@@ -869,12 +789,11 @@ fn run_combined() -> Result<(), Error> {
 						ActiveSide::Circular => draw_circular_with_buffer(&mut pixels, elapsed, &mut buffers.circular),
 						ActiveSide::Full => draw_full_screen_with_buffer(&mut pixels, &world, elapsed, &mut buffers),
 						ActiveSide::RayPattern => draw_ray_pattern(&mut pixels, elapsed),
-						ActiveSide::Pythagoras => draw_pythagoras(&mut pixels, elapsed),
-						ActiveSide::FibonacciSpiral => draw_fibonacci_spiral(&mut pixels, elapsed),
-						ActiveSide::SimpleProof => draw_simple_proof(&mut pixels, elapsed),
+						ActiveSide::Pythagoras => pythagoras::draw_frame(&mut pixels, elapsed),
+						ActiveSide::FibonacciSpiral => fibonacci_spiral::draw_frame(&mut pixels, elapsed),
+						ActiveSide::SimpleProof => simple_proof::draw_frame(&mut pixels, elapsed),
 					}
 					let frame = pixels.frame_mut();
-					draw_particle_fountain(frame, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, elapsed);
 					fps_counter.update();
 					let fps_text = format!("FPS: {:.1}", fps_counter.fps());
 					draw_text_ab_glyph(frame, &fps_text, 10.0, (HEIGHT - 30) as f32, [255, 255, 0, 255], WIDTH);
@@ -971,229 +890,13 @@ fn draw_full_screen_with_buffer(pixels: &mut Pixels, world: &World, time: f32, b
 		}
 	}
 	// Particle fountain (bottom-left)
-	draw_particle_fountain(frame, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, time);
+	particle_fountain::draw_frame(frame, WIDTH, HEIGHT, time);
 	// Ray pattern visualization (bottom-right)
 	let ray_width = ORIGINAL_WIDTH;
 	let ray_height = ORIGINAL_HEIGHT;
 	let y_offset = ORIGINAL_HEIGHT as usize;
 	let ray_frame = &mut frame[(y_offset * WIDTH as usize * 4)..];
 	ray_pattern::draw_frame(ray_frame, ray_width, ray_height, time, x_offset, WIDTH);
-}
-
-// Draw a particle fountain effect in the bottom-left quadrant
-fn draw_particle_fountain(frame: &mut [u8], full_width: u32, full_height: u32, quad_width: u32, quad_height: u32, time: f32) {
-	let y_offset = quad_height as usize;
-	let fountain_x = quad_width as f32 / 2.0;
-	let fountain_y = y_offset as f32 + (full_height as f32 - y_offset as f32) / 2.0;
-	
-	for radius in 0..40 {
-		let color_intensity = 255 - (radius * 5).min(255);
-		draw_circle(frame, fountain_x as i32, fountain_y as i32, 40 - radius, [255, color_intensity as u8, 0, 255], full_width);
-	}
-	
-	let blink = ((time * 5.0).sin() * 0.5 + 0.5) * 255.0;
-	draw_huge_text(frame, "FOUNTAIN", quad_width as i32 / 2 - 200, y_offset as i32 + 50, [255, blink as u8, blink as u8, 255], full_width);
-	
-	let particles = 1000;
-	for i in 0..particles {
-		let lifetime = 2.0; 
-		let particle_time = (time + i as f32 * 0.01) % lifetime;
-		let progress = particle_time / lifetime;
-		
-		let angle = std::f32::consts::PI / 2.0 + (i as f32 / particles as f32 - 0.5) * std::f32::consts::PI * 1.5;
-		let speed = 600.0 * (1.0 - progress * 0.3);
-		let gravity = 800.0;
-		
-		let x = fountain_x + angle.cos() * speed * particle_time;
-		let y = fountain_y - angle.sin() * speed * particle_time + 0.5 * gravity * particle_time * particle_time;
-		
-		if x >= 0.0 && x < quad_width as f32 && y >= quad_height as f32 && y < full_height as f32 {
-			let fade = if progress < 0.1 {
-				progress / 0.1
-			} else if progress > 0.7 {
-				(1.0 - progress) / 0.3
-			} else {
-				1.0
-			};
-			
-			let hue = (i as f32 / particles as f32 + time * 0.3) % 1.0;
-			let color = hsv_to_rgb(hue, 1.0, 1.0);
-			let size = 4 + (10.0 * (1.0 - progress)) as i32;
-			
-			draw_extra_bright_particle(frame, x as i32, y as i32, size, [color[0], color[1], color[2], (255.0 * fade) as u8], full_width);
-		}
-	}
-	
-	let pulse = (time * 10.0).sin() > 0.0;
-	let border_color = if pulse { [255, 0, 0, 255] } else { [255, 255, 255, 255] };
-	draw_border(frame, 0, y_offset as i32, quad_width as i32, (full_height - quad_height) as i32, border_color, full_width);
-	
-	if pulse {
-		for y in y_offset..(full_height as usize) {
-			for x in 0..(quad_width as usize) {
-				let idx = 4 * (y * full_width as usize + x);
-				if idx + 3 < frame.len() && (x + y) % 20 == 0 {
-					frame[idx] = 255;
-					frame[idx + 1] = 255;
-					frame[idx + 2] = 0;
-					frame[idx + 3] = 255;
-				}
-			}
-		}
-	}
-}
-
-// Draw a super bright particle that's impossible to miss - improved with safety
-fn draw_extra_bright_particle(frame: &mut [u8], x: i32, y: i32, size: i32, color: [u8; 4], width: u32) {
-	let glow_radius = size * 3;
-	let height = frame.len() / (4 * width as usize);
-	
-	// Early culling - skip if entirely off-screen
-	if x + glow_radius < 0 || x - glow_radius >= width as i32 || 
-	   y + glow_radius < 0 || y - glow_radius >= height as i32 {
-		return;
-	}
-	
-	for dy in -glow_radius..=glow_radius {
-		for dx in -glow_radius..=glow_radius {
-			let dist_sq = dx * dx + dy * dy;
-			
-			// Skip if beyond glow radius squared
-			if dist_sq > glow_radius * glow_radius {
-				continue;
-			}
-			
-			let distance = (dist_sq as f32).sqrt();
-			
-			// Enhanced brightness even at edge of glow
-			let intensity = if distance <= size as f32 {
-				2.0  // Extra bright core (values > 1 will be clamped but help with additive blending)
-			} else if distance <= glow_radius as f32 {
-				1.5 * (1.0 - (distance - size as f32) / (glow_radius as f32 - size as f32))
-			} else {
-				0.0
-			};
-			
-			// Apply with maximum brightness
-			let alpha_factor = color[3] as f32 / 255.0;
-			let r = (intensity * color[0] as f32 * alpha_factor * 3.0).min(255.0) as u8;
-			let g = (intensity * color[1] as f32 * alpha_factor * 3.0).min(255.0) as u8;
-			let b = (intensity * color[2] as f32 * alpha_factor * 3.0).min(255.0) as u8;
-			
-			// Use our safe blending function with boosted intensity
-			blend_pixel_safe(
-				frame,
-				x + dx, y + dy,
-				width, height as u32,
-				[r, g, b, 255],
-				1.0
-			);
-		}
-	}
-}
-
-// Draw a massive text label - much bigger than the previous one - improved with safety
-fn draw_huge_text(frame: &mut [u8], text: &str, x: i32, y: i32, color: [u8; 4], width: u32) {
-	let char_width = 30;  // Much bigger character size
-	let char_height = 50;
-	let stroke_width = 4;
-	let height = frame.len() / (4 * width as usize);
-	
-	// Early return if text would be completely off-screen
-	if y + char_height < 0 || y >= height as i32 {
-		return;
-	}
-	
-	for (i, _c) in text.chars().enumerate() {
-		let cx = x + (i as i32 * char_width);
-		
-		// Skip if this character is outside frame
-		if cx + char_width < 0 || cx >= width as i32 {
-			continue;
-		}
-		
-		// Draw a filled rectangle for each character
-		for dy in 0..char_height {
-			for dx in 0..char_width {
-				let is_border = dx < stroke_width || dx >= char_width - stroke_width || 
-							   dy < stroke_width || dy >= char_height - stroke_width;
-				
-				if is_border {
-					// Use our safe pixel setter
-					set_pixel_safe(frame, cx + dx, y + dy, width, height as u32, color);
-				}
-			}
-		}
-	}
-}
-
-// Draw a border around a rectangle
-fn draw_border(frame: &mut [u8], x: i32, y: i32, width: i32, height: i32, color: [u8; 4], stride: u32) {
-	let border_width = 3;
-	
-	// Top border
-	for dy in 0..border_width {
-		for dx in 0..width {
-			let px = x + dx;
-			let py = y + dy;
-			
-			let idx = 4 * (py as usize * stride as usize + px as usize);
-			if idx + 3 < frame.len() {
-				frame[idx] = color[0];
-				frame[idx + 1] = color[1];
-				frame[idx + 2] = color[2];
-				frame[idx + 3] = color[3];
-			}
-		}
-	}
-	
-	// Bottom border
-	for dy in 0..border_width {
-		for dx in 0..width {
-			let px = x + dx;
-			let py = y + height - 1 - dy;
-			
-			let idx = 4 * (py as usize * stride as usize + px as usize);
-			if idx + 3 < frame.len() {
-				frame[idx] = color[0];
-				frame[idx + 1] = color[1];
-				frame[idx + 2] = color[2];
-				frame[idx + 3] = color[3];
-			}
-		}
-	}
-	
-	// Left border
-	for dx in 0..border_width {
-		for dy in 0..height {
-			let px = x + dx;
-			let py = y + dy;
-			
-			let idx = 4 * (py as usize * stride as usize + px as usize);
-			if idx + 3 < frame.len() {
-				frame[idx] = color[0];
-				frame[idx + 1] = color[1];
-				frame[idx + 2] = color[2];
-				frame[idx + 3] = color[3];
-			}
-		}
-	}
-	
-	// Right border
-	for dx in 0..border_width {
-		for dy in 0..height {
-			let px = x + width - 1 - dx;
-			let py = y + dy;
-			
-			let idx = 4 * (py as usize * stride as usize + px as usize);
-			if idx + 3 < frame.len() {
-				frame[idx] = color[0];
-				frame[idx + 1] = color[1];
-				frame[idx + 2] = color[2];
-				frame[idx + 3] = color[3];
-			}
-		}
-	}
 }
 
 // Draw the ray pattern visualization on the full screen
@@ -1214,488 +917,9 @@ fn draw_ray_pattern(pixels: &mut Pixels, time: f32) {
 }
 
 // Pythagoras visualization - simpler version of the macroquad example
-fn draw_pythagoras(pixels: &mut Pixels, elapsed: f32) {
-    // Get dimensions first
-    let width = pixels.texture().width();
-    let height = pixels.texture().height();
-    
-    // Then get the frame
-    let frame = pixels.frame_mut();
-    
-    // Clear the frame with a white background
-    for pixel in frame.chunks_exact_mut(4) {
-        pixel[0] = 255; // R
-        pixel[1] = 255; // G
-        pixel[2] = 255; // B
-        pixel[3] = 255; // A
-    }
-    
-    // Parameters
-    let a = 100.0f32;
-    let b = 150.0f32;
-    let c = (a*a + b*b).sqrt();
-    let center_x = width as f32 / 2.0;
-    let center_y = height as f32 / 2.0;
-    let angle = elapsed * 0.5; // Rotation angle
-    
-    // Draw big square (c × c) - light gray
-    let square_color = [200, 200, 200, 255];
-    let half_c = (c / 2.0) as i32;
-    
-    for y in -half_c..half_c {
-        for x in -half_c..half_c {
-            set_pixel_safe(frame, 
-                           center_x as i32 + x, 
-                           center_y as i32 + y, 
-                           width, height, 
-                           square_color);
-        }
-    }
-    
-    // Draw four triangles (blue)
-    let triangle_color = [0, 0, 255, 255];
-    
-    for i in 0..4 {
-        let theta = angle + i as f32 * std::f32::consts::FRAC_PI_2;
-        
-        // Triangle vertices
-        let p1_x = center_x + theta.cos() * (c / 2.0);
-        let p1_y = center_y + theta.sin() * (c / 2.0);
-        
-        let p2_x = center_x + (theta + (b as f32).to_radians()).cos() * (a / 2.0);
-        let p2_y = center_y + (theta + b.to_radians()).sin() * (a / 2.0);
-        
-        let p3_x = center_x + (theta - (a as f32).to_radians()).cos() * (b / 2.0);
-        let p3_y = center_y + (theta - a.to_radians()).sin() * (b / 2.0);
-        
-        // Draw filled triangle using a simple scanline algorithm
-        draw_triangle_filled(
-            frame,
-            p1_x as i32, p1_y as i32,
-            p2_x as i32, p2_y as i32,
-            p3_x as i32, p3_y as i32,
-            width, height,
-            triangle_color
-        );
-    }
-    
-    // Draw explanatory text
-    let text_color = [0, 0, 0, 255];
-    draw_simple_text(frame, "Pythagoras Theorem: a² + b² = c²", 
-                   20, 30, 
-                   width, height, 
-                   text_color);
-    
-    let a_squared = (a * a).round() as i32;
-    let b_squared = (b * b).round() as i32;
-    let c_squared = (c * c).round() as i32;
-    
-    draw_simple_text(frame, &format!("{} + {} = {}", a_squared, b_squared, c_squared), 
-                   20, 50, 
-                   width, height, 
-                   text_color);
-}
-
-// Fibonacci spiral visualization
-fn draw_fibonacci_spiral(pixels: &mut Pixels, elapsed: f32) {
-    // Store dimensions first
-    let width = pixels.texture().width();
-    let height = pixels.texture().height();
-    // Then get frame
-    let frame = pixels.frame_mut();
-    
-    // Use elapsed time to add subtle animation effect
-    let animation_offset = (elapsed * 0.5).sin() * 5.0;
-    
-    // Clear frame with white background
-    for pixel in frame.chunks_exact_mut(4) {
-        pixel[0] = 255; // R
-        pixel[1] = 255; // G
-        pixel[2] = 255; // B
-        pixel[3] = 255; // A
-    }
-    
-    // Calculate first few Fibonacci numbers
-    let mut fibonacci = vec![1, 1];
-    for i in 2..12 {
-        fibonacci.push(fibonacci[i-1] + fibonacci[i-2]);
-    }
-    
-    // Colors for each square
-    let colors = [
-        [255, 0, 0, 255],    // Red
-        [0, 255, 0, 255],    // Green
-        [0, 0, 255, 255],    // Blue
-        [255, 255, 0, 255],  // Yellow
-        [255, 0, 255, 255],  // Magenta
-        [0, 255, 255, 255],  // Cyan
-        [255, 128, 0, 255],  // Orange
-        [128, 0, 255, 255],  // Purple
-        [0, 128, 0, 255],    // Dark green
-        [128, 128, 255, 255],// Light blue
-        [128, 64, 0, 255],   // Brown
-        [255, 128, 128, 255],// Pink
-    ];
-    
-    let scale_factor = 4.0; // Scale the spiral to fit the window
-    let center_x = width as i32 / 2;
-    let center_y = height as i32 / 2;
-    let offset_x = center_x - (fibonacci[fibonacci.len()-1] as f32 * scale_factor / 2.0) as i32 + animation_offset as i32;
-    let offset_y = center_y - (fibonacci[fibonacci.len()-1] as f32 * scale_factor / 2.0) as i32;
-    
-    // Draw the squares
-    let mut x = 0;
-    let mut y = 0;
-    let mut direction = 0; // 0: right, 1: down, 2: left, 3: up
-    
-    for (i, &fib) in fibonacci.iter().enumerate() {
-        let size = (fib as f32 * scale_factor) as i32;
-        let color = colors[i % colors.len()];
-        
-        // Draw the square
-        for sx in 0..size {
-            for sy in 0..size {
-                let px = offset_x + x + sx;
-                let py = offset_y + y + sy;
-                
-                // Draw border
-                if sx == 0 || sx == size - 1 || sy == 0 || sy == size - 1 {
-                    set_pixel_safe(frame, px, py, width, height, [0, 0, 0, 255]);
-                } else {
-                    // Fill with a lighter version of the color
-                    set_pixel_safe(frame, px, py, width, height, 
-                                  [color[0]/2 + 128, color[1]/2 + 128, color[2]/2 + 128, 255]);
-                }
-            }
-        }
-        
-        // Draw a quarter circle in each square to form the spiral
-        let radius = size;
-        let center_spiral_x;
-        let center_spiral_y;
-        
-        match direction {
-            0 => { // right
-                center_spiral_x = x + size;
-                center_spiral_y = y + size;
-                
-                // Draw arc - bottom right corner
-                for angle in 0..90 {
-                    let rad_angle = (angle as f32) * std::f32::consts::PI / 180.0;
-                    let arc_x = center_spiral_x as f32 - rad_angle.sin() * radius as f32;
-                    let arc_y = center_spiral_y as f32 - rad_angle.cos() * radius as f32;
-                    
-                    set_pixel_safe(frame, 
-                                  offset_x + arc_x as i32, 
-                                  offset_y + arc_y as i32, 
-                                  width, height, 
-                                  [0, 0, 0, 255]);
-                }
-                
-                // Update for next square
-                x += size;
-            },
-            1 => { // down
-                center_spiral_x = x;
-                center_spiral_y = y + size;
-                
-                // Draw arc - bottom left corner
-                for angle in 0..90 {
-                    let rad_angle = (angle as f32) * std::f32::consts::PI / 180.0;
-                    let arc_x = center_spiral_x as f32 + rad_angle.cos() * radius as f32;
-                    let arc_y = center_spiral_y as f32 - rad_angle.sin() * radius as f32;
-                    
-                    set_pixel_safe(frame, 
-                                  offset_x + arc_x as i32, 
-                                  offset_y + arc_y as i32, 
-                                  width, height, 
-                                  [0, 0, 0, 255]);
-                }
-                
-                // Update for next square
-                y += size;
-            },
-            2 => { // left
-                center_spiral_x = x;
-                center_spiral_y = y;
-                
-                // Draw arc - top left corner
-                for angle in 0..90 {
-                    let rad_angle = (angle as f32) * std::f32::consts::PI / 180.0;
-                    let arc_x = center_spiral_x as f32 + rad_angle.sin() * radius as f32;
-                    let arc_y = center_spiral_y as f32 + rad_angle.cos() * radius as f32;
-                    
-                    set_pixel_safe(frame, 
-                                  offset_x + arc_x as i32, 
-                                  offset_y + arc_y as i32, 
-                                  width, height, 
-                                  [0, 0, 0, 255]);
-                }
-                
-                // Update for next square
-                x -= size;
-            },
-            3 => { // up
-                center_spiral_x = x + size;
-                center_spiral_y = y;
-                
-                // Draw arc - top right corner
-                for angle in 0..90 {
-                    let rad_angle = (angle as f32) * std::f32::consts::PI / 180.0;
-                    let arc_x = center_spiral_x as f32 - rad_angle.cos() * radius as f32;
-                    let arc_y = center_spiral_y as f32 + rad_angle.sin() * radius as f32;
-                    
-                    set_pixel_safe(frame, 
-                                  offset_x + arc_x as i32, 
-                                  offset_y + arc_y as i32, 
-                                  width, height, 
-                                  [0, 0, 0, 255]);
-                }
-                
-                // Update for next square
-                y -= size;
-            },
-            _ => unreachable!(),
-        }
-        
-        // Change direction for next square
-        direction = (direction + 1) % 4;
-    }
-    
-    // Draw explanatory text
-    let text_color = [0, 0, 0, 255];    draw_simple_text(frame, "Fibonacci Spiral", 
-                  20, 30, 
-                  width, height, 
-                  text_color);
-    
-    draw_simple_text(frame, &format!("Fibonacci sequence: {:?}", &fibonacci[..10]), 
-              20, 50, 
-              width, height, 
-              text_color);
-}
-
-// Simple proof visualization
-fn draw_simple_proof(pixels: &mut Pixels, elapsed: f32) {
-    // Store dimensions first
-    let width = pixels.texture().width();
-    let height = pixels.texture().height();
-    // Then get frame
-    let frame = pixels.frame_mut();
-    
-    // Clear frame with white background
-    for pixel in frame.chunks_exact_mut(4) {
-        pixel[0] = 255; // R
-        pixel[1] = 255; // G
-        pixel[2] = 255; // B
-        pixel[3] = 255; // A
-    }
-    
-    // Visual proof that 1 + 2 + 3 + ... + n = n(n+1)/2
-    let n = ((elapsed.sin() * 4.0 + 10.0) as i32).max(5).min(15); // Vary between 5-15
-    let sum = n * (n + 1) / 2;
-    
-    // Draw title
-    let text_color = [0, 0, 0, 255];
-    draw_simple_text(frame, &format!("Visual proof: 1 + 2 + 3 + ... + {} = {}*({} + 1)/2 = {}", 
-                            n, n, n, sum), 
-              20, 30, 
-              width, height, 
-              text_color);
-    
-    // Draw triangular pattern of dots
-    let dot_size = 5;
-    let spacing = 15;
-    let start_x = (width as i32 / 2) - (n * spacing / 2);
-    let start_y = 100;
-    
-    // Draw the triangular arrangement
-    for i in 1..=n {
-        for j in 1..=i {
-            let x = start_x + (j - 1) * spacing;
-            let y = start_y + (i - 1) * spacing;
-            
-            // Draw a dot (small filled circle)
-            for dy in -dot_size..=dot_size {
-                for dx in -dot_size..=dot_size {
-                    if dx*dx + dy*dy <= dot_size*dot_size {
-                        set_pixel_safe(frame, x + dx, y + dy, width, height, [255, 0, 0, 255]);
-                    }
-                }
-            }
-        }
-        
-        // Draw the row sum
-        draw_simple_text(frame, &format!("Row {}: {}", i, i), 
-                  start_x + n * spacing + 20, 
-                  start_y + (i - 1) * spacing, 
-                  width, height, 
-                  text_color);
-    }
-    
-    // Draw the rectangle proof (n by n+1 rectangle split into two triangles)
-    let rect_start_x = start_x;
-    let rect_start_y = start_y + (n + 3) * spacing;
-    
-    draw_simple_text(frame, "Alternative proof: n(n+1)/2 is half of an n × (n+1) rectangle", 
-              20, rect_start_y - 30, 
-              width, height, 
-              text_color);
-    
-    // Draw the rectangle
-    for i in 0..n {
-        for j in 0..n+1 {
-            let x = rect_start_x + j * spacing;
-            let y = rect_start_y + i * spacing;
-            
-            // Draw a dot (small filled circle)
-            for dy in -dot_size..=dot_size {
-                for dx in -dot_size..=dot_size {
-                    if dx*dx + dy*dy <= dot_size*dot_size {
-                        // Different colors for upper and lower triangles
-                        let color = if i + j < n {
-                            [0, 0, 255, 255]  // Blue for lower triangle
-                        } else {
-                            [0, 150, 0, 255]  // Green for upper triangle
-                        };
-                        
-                        set_pixel_safe(frame, x + dx, y + dy, width, height, color);
-                    }
-                }
-            }
-        }
-    }
-    
-    // Draw the diagonal line separating the triangles
-    for i in 0..=n {
-        let x = rect_start_x + i * spacing;
-        let y = rect_start_y + (n - i) * spacing;
-        
-        for dy in -2..=2 {
-            for dx in -2..=2 {
-                if dx*dx + dy*dy <= 4 {
-                    set_pixel_safe(frame, x + dx, y + dy, width, height, [0, 0, 0, 255]);
-                }
-            }
-        }
-    }
-    
-    // Show the formula
-    draw_simple_text(frame, &format!("Rectangle area: {} × {} = {}", n, n+1, n*(n+1)), 
-              rect_start_x, rect_start_y + n * spacing + 30, 
-              width, height, 
-              text_color);
-              
-    draw_simple_text(frame, &format!("Triangle area (half): {}/{} = {}", n*(n+1), 2, n*(n+1)/2), 
-              rect_start_x, rect_start_y + n * spacing + 50, 
-              width, height, 
-              text_color);
-}
-
-// Helper function to draw filled triangles
-fn draw_triangle_filled(
-    frame: &mut [u8], 
-    x1: i32, y1: i32, 
-    x2: i32, y2: i32, 
-    x3: i32, y3: i32, 
-    width: u32, height: u32, 
-    color: [u8; 4]
-) {
-    // Sort vertices by y-coordinate
-    let mut vertices = [(x1, y1), (x2, y2), (x3, y3)];
-    vertices.sort_by_key(|&(_, y)| y);
-    
-    let [(x1, y1), (x2, y2), (x3, y3)] = vertices;
-    
-    // Draw the top half of the triangle
-    if y2 > y1 {
-        let slope1 = (x2 - x1) as f32 / (y2 - y1) as f32;
-        let slope2 = (x3 - x1) as f32 / (y3 - y1) as f32;
-        
-        for y in y1..=y2 {
-            let dy = y - y1;
-            let start_x = (x1 as f32 + slope1 * dy as f32) as i32;
-            let end_x = (x1 as f32 + slope2 * dy as f32) as i32;
-            
-            for x in std::cmp::min(start_x, end_x)..=std::cmp::max(start_x, end_x) {
-                set_pixel_safe(frame, x, y, width, height, color);
-            }
-        }
-    }
-    
-    // Draw the bottom half of the triangle
-    if y3 > y2 {
-        let slope1 = (x3 - x2) as f32 / (y3 - y2) as f32;
-        let slope2 = (x3 - x1) as f32 / (y3 - y1) as f32;
-        
-        for y in y2+1..=y3 {
-            let dy1 = y - y2;
-            let dy2 = y - y1;
-            let start_x = (x2 as f32 + slope1 * dy1 as f32) as i32;
-            let end_x = (x1 as f32 + slope2 * dy2 as f32) as i32;
-            
-            for x in std::cmp::min(start_x, end_x)..=std::cmp::max(start_x, end_x) {
-                set_pixel_safe(frame, x, y, width, height, color);
-            }
-        }
-    }
-}
-
-// Helper function to draw simple text
-fn draw_simple_text(
-    frame: &mut [u8],
-    text: &str,
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-    color: [u8; 4]
-) {
-    // Simple ASCII character rendering with fixed-width font
-    let char_width = 8;
-    let char_height = 10;
-    
-    for (i, c) in text.chars().enumerate() {
-        let cx = x + i as i32 * char_width;
-        
-        // Skip if out of view
-        if cx < 0 || cx >= width as i32 || y < 0 || y >= height as i32 {
-            continue;
-        }
-        
-        // Draw each character
-        match c {
-            'A' => {
-                for dy in 0..char_height {
-                    for dx in 0..char_width {
-                        if (dx == 0 || dx == char_width-1) && dy > 0 || // vertical lines
-                           dy == 0 && dx > 0 && dx < char_width-1 ||     // top
-                           dy == char_height/2 {                         // middle
-                            set_pixel_safe(frame, cx + dx, y + dy, width, height, color);
-                        }
-                    }
-                }
-            },
-            // Add more characters as needed
-            _ => {
-                // Simple box for unimplemented characters
-                for dy in 0..char_height {
-                    for dx in 0..char_width {
-                        if dy == 0 || dy == char_height-1 || dx == 0 || dx == char_width-1 {
-                            set_pixel_safe(frame, cx + dx, y + dy, width, height, color);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Add at the top, after other mod declarations:
-mod pixel_utils;
-use pixel_utils::*;
 
 // Add at the bottom of the file:
-use ab_glyph::{FontArc, PxScale, point, Glyph, GlyphId};
+use ab_glyph::{FontArc, PxScale, point, Glyph};
 use ab_glyph::Font;
 
 static FONT_DATA: &[u8] = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");

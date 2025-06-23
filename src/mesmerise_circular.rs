@@ -1,12 +1,4 @@
-use pixels::{Pixels, SurfaceTexture};
-use winit::{
-    dpi::LogicalSize,
-    keyboard::KeyCode,
-    event_loop::{EventLoop},
-    window::WindowBuilder,
-};
-use winit_input_helper::WinitInputHelper;
-use std::time::{Duration, Instant};
+// No imports needed here
 
 /// Canvas size (split into three vertical regions)
 pub const WIDTH: u32 = 900;

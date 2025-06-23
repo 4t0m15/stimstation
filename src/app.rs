@@ -149,8 +149,14 @@ impl App {
     pub fn draw(&mut self, frame: &mut [u8]) {
         // Always clear the frame first
         frame.fill(0);
-        
+
         let elapsed = self.start_time.elapsed().as_secs_f32();
+
+        // If menu is visible, only render the menu and skip visualizations
+        if self.menu.is_visible() {
+            self.menu.render(frame, WIDTH, HEIGHT);
+            return;
+        }
 
         // Draw a simple test pattern if visualizations fail
         let draw_test_pattern = false;

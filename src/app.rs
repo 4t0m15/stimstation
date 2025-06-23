@@ -1,15 +1,14 @@
-use crate::types::{ActiveSide, Color, FpsCounter, Buffers, World, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT};
+use crate::types::{ActiveSide, FpsCounter, Buffers, World, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT};
 use crate::menu::Menu;
 use crate::visualizations;
 use crate::text_rendering;
 use winit::{
-    event::{MouseButton,WindowEvent},
+    event::{MouseButton},
     keyboard::KeyCode,
     window::Window,
 };
 use winit_input_helper::WinitInputHelper;
 use std::time::Instant;
-use pixels::Pixels;
 
 pub struct App {
     world: World,
@@ -24,16 +23,16 @@ pub struct App {
 }
 
 impl App {
-    pub fn new() -> Self {
-        let mut world = World::new();
-        if let Some(monitor) = winit::window::Window::primary_monitor(&winit::event_loop::EventLoop::new().unwrap()) {
-            visualizations::ray_pattern::set_monitor_dimensions(&monitor);
+    pub fn new(window: &Window) -> Self {
+        let world = World::new();
+        if let Some(monitor) = window.primary_monitor() {
+            crate::ray_pattern::set_monitor_dimensions(&monitor);
         }
 
         Self {
             world,
             menu: Menu::new(),
-            active_side: ActiveSide::Full,
+            active_side: ActiveSide::Circular,  // Start with circular which is simpler
             start_time: Instant::now(),
             fps_counter: FpsCounter::new(),
             is_fullscreen: false,
@@ -76,7 +75,7 @@ impl App {
                 None
             });
             if let Some(monitor) = window.primary_monitor() {
-                visualizations::ray_pattern::set_monitor_dimensions(&monitor);
+                crate::ray_pattern::set_monitor_dimensions(&monitor);
             }
         }
 
@@ -148,29 +147,73 @@ impl App {
     }
 
     pub fn draw(&mut self, frame: &mut [u8]) {
-        self.buffers.clear();
+        // Always clear the frame first
+        frame.fill(0);
+        
         let elapsed = self.start_time.elapsed().as_secs_f32();
 
+        // Draw a simple test pattern if visualizations fail
+        let draw_test_pattern = false;
+
         match self.active_side {
-            ActiveSide::Original => visualizations::draw_original(frame, &self.world, &mut self.buffers.original),
-            ActiveSide::Circular => visualizations::draw_circular_with_buffer(frame, elapsed, &mut self.buffers.circular),
-            ActiveSide::Full => visualizations::draw_full_screen_with_buffer(frame, &self.world, elapsed, &mut self.buffers),
-            ActiveSide::RayPattern => visualizations::draw_ray_pattern(frame, elapsed),
-            ActiveSide::Pythagoras => visualizations::pythagoras::draw_frame(frame, elapsed),
-            ActiveSide::FibonacciSpiral => visualizations::fibonacci_spiral::draw_frame(frame, elapsed),
-            ActiveSide::SimpleProof => visualizations::simple_proof::draw_frame(frame, elapsed),
+            ActiveSide::Original => {
+                self.buffers.clear();
+                visualizations::draw_original_with_buffer(frame, &self.world, &mut self.buffers.original);
+            },
+            ActiveSide::Circular => {
+                self.buffers.clear();
+                visualizations::draw_circular_with_buffer(frame, elapsed, &mut self.buffers.circular);
+            },
+            ActiveSide::Full => {
+                self.buffers.clear();
+                visualizations::draw_full_screen_with_buffer(frame, &self.world, elapsed, &mut self.buffers);
+            },
+            ActiveSide::RayPattern => crate::ray_pattern::draw_frame(frame, WIDTH, HEIGHT, elapsed, 0, WIDTH),
+            ActiveSide::Pythagoras => visualizations::draw_pythagoras_frame(frame, elapsed),
+            ActiveSide::FibonacciSpiral => visualizations::draw_fibonacci_frame(frame, elapsed),
+            ActiveSide::SimpleProof => visualizations::draw_simple_proof_frame(frame, elapsed),
             ActiveSide::Combined => visualizations::draw_all_visualizations(frame, &self.world, elapsed),
         }
 
+        // Draw FPS counter
         let fps_text = format!("FPS: {:.1}", self.fps_counter.fps());
         text_rendering::draw_text_ab_glyph(frame, &fps_text, 10.0, (HEIGHT - 30) as f32, [255, 255, 0, 255], WIDTH);
 
+        // Draw help if requested
         if self.show_help {
             text_rendering::draw_keyboard_guide(frame, WIDTH);
         }
 
+        // Always draw menu if visible - this should ensure something is always drawn
         if self.menu.is_visible() {
             self.menu.render(frame, WIDTH, HEIGHT);
+        }
+
+        // If frame is still all black, draw a test pattern
+        let mut is_all_black = true;
+        for i in (0..frame.len()).step_by(4) {
+            if frame[i] != 0 || frame[i + 1] != 0 || frame[i + 2] != 0 {
+                is_all_black = false;
+                break;
+            }
+        }
+
+        if is_all_black || draw_test_pattern {
+            // Draw a simple test pattern
+            for y in 0..HEIGHT {
+                for x in 0..WIDTH {
+                    let idx = 4 * (y * WIDTH + x) as usize;
+                    if idx + 3 < frame.len() {
+                        frame[idx] = ((x + y) % 255) as u8;     // Red
+                        frame[idx + 1] = ((x * 2) % 255) as u8; // Green  
+                        frame[idx + 2] = ((y * 2) % 255) as u8; // Blue
+                        frame[idx + 3] = 255;                   // Alpha
+                    }
+                }
+            }
+            
+            // Draw text on top
+            text_rendering::draw_text_ab_glyph(frame, "StimStation - Test Pattern", 50.0, 50.0, [255, 255, 255, 255], WIDTH);
         }
     }
 

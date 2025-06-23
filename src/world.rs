@@ -1,6 +1,5 @@
 use crate::types::{World, Line, Particle, Position, Color, VisualMode, hsv_to_rgb, WIDTH, HEIGHT, MAX_LINES};
 use crate::types::{SimpleWorld, SimpleLine, SimpleParticle, SimplePos, SimpleColor, FpsCounter, Buffers};
-use crate::pixel_utils::*;
 use crate::mesmerise_circular;
 use rand::prelude::*;
 use rayon::prelude::*;
@@ -218,6 +217,52 @@ impl World {
     pub fn get_status(&self) -> String {
         format!("Mesmerise - Mode: {:?} - Lines: {} - Space: change mode, +/-: lines, E: explosion, 1-4: views, Mouse: interact",
             self.mode, self.lines.len())
+    }
+
+    pub fn draw(&self, frame: &mut [u8]) {
+        // Clear frame with background color
+        frame.chunks_exact_mut(4).for_each(|pixel| {
+            pixel[0] = self.background_color.red;
+            pixel[1] = self.background_color.green;
+            pixel[2] = self.background_color.blue;
+            pixel[3] = 255;
+        });
+        
+        // Draw all lines
+        for line in &self.lines {
+            crate::pixel_utils::draw_line(
+                frame, 
+                line.pos[0].x as i32, line.pos[0].y as i32, 
+                line.pos[1].x as i32, line.pos[1].y as i32, 
+                [line.color.red, line.color.green, line.color.blue, 255], 
+                WIDTH as i32
+            );
+        }
+        
+        // Draw particles
+        for particle in &self.particles {
+            let radius = particle.size as i32;
+            let alpha = (particle.life * 255.0) as u8;
+            
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    if dx * dx + dy * dy <= radius * radius {
+                        let px = particle.pos.x as i32 + dx;
+                        let py = particle.pos.y as i32 + dy;
+                        
+                        if px >= 0 && px < WIDTH as i32 && py >= 0 && py < HEIGHT as i32 {
+                            let idx = 4 * (py as usize * WIDTH as usize + px as usize);
+                            if idx + 3 < frame.len() {
+                                frame[idx] = particle.color.red;
+                                frame[idx + 1] = particle.color.green;
+                                frame[idx + 2] = particle.color.blue;
+                                frame[idx + 3] = alpha;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -569,94 +614,49 @@ impl SimpleWorld {
     }
     
     pub fn draw(&self, frame: &mut [u8]) {
-        // Check if we need trails effect (for Rainbow mode)
-        let use_trails = self.mode == VisualMode::Rainbow;
+        // Clear frame with background color (background_color is [u8; 3])
+        frame.chunks_exact_mut(4).for_each(|pixel| {
+            pixel[0] = self.background_color[0]; // R
+            pixel[1] = self.background_color[1]; // G
+            pixel[2] = self.background_color[2]; // B
+            pixel[3] = 255; // A
+        });
         
-        if use_trails {
-            // Fade the previous frame instead of clearing it
-            frame.chunks_exact_mut(4).for_each(|pixel| {
-                // Fade each color channel
-                pixel[0] = (pixel[0] as f32 * 0.85) as u8;
-                pixel[1] = (pixel[1] as f32 * 0.85) as u8;
-                pixel[2] = (pixel[2] as f32 * 0.85) as u8;
-                pixel[3] = 255; // A
-            });
-        } else {
-            // Set background with custom color
-            frame.chunks_exact_mut(4).for_each(|pixel| {
-                pixel[0] = self.background_color[0]; // R
-                pixel[1] = self.background_color[1]; // G
-                pixel[2] = self.background_color[2]; // B
-                pixel[3] = 255; // A
-            });
-        }
-        
-        // Draw all lines
+        // Draw all lines (pos is [(f32, f32); 2], color is [u8; 3])
         for line in &self.lines {
-            draw_line(
+            crate::pixel_utils::draw_line(
                 frame, 
                 line.pos[0].0 as i32, line.pos[0].1 as i32, 
                 line.pos[1].0 as i32, line.pos[1].1 as i32, 
                 [line.color[0], line.color[1], line.color[2], 255], 
-                line.width as i32
+                WIDTH as i32
             );
         }
         
-        // Draw all particles
+        // Draw particles (pos is (f32, f32), color is [u8; 3])
         for particle in &self.particles {
-            // Calculate alpha based on remaining life
-            let alpha = ((particle.life / 1.5) * 255.0) as u8;
+            let radius = particle.size as i32;
+            let alpha = (particle.life * 255.0) as u8;
             
-            // Draw the particle as a point with glow
-            draw_point(
-                frame,
-                particle.pos.0 as i32,
-                particle.pos.1 as i32,
-                [particle.color[0], particle.color[1], particle.color[2], alpha],
-                particle.size as i32
-            );
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    if dx * dx + dy * dy <= radius * radius {
+                        let px = particle.pos.0 as i32 + dx;
+                        let py = particle.pos.1 as i32 + dy;
+                        
+                        if px >= 0 && px < WIDTH as i32 && py >= 0 && py < HEIGHT as i32 {
+                            let idx = 4 * (py as usize * WIDTH as usize + px as usize);
+                            if idx + 3 < frame.len() {
+                                frame[idx] = particle.color[0];
+                                frame[idx + 1] = particle.color[1];
+                                frame[idx + 2] = particle.color[2];
+                                frame[idx + 3] = alpha;
+                            }
+                        }
+                    }
+                }
+            }
         }
-    }
-    
-    pub fn set_mouse_pos(&mut self, x: f32, y: f32) {
-        self.mouse_pos = Some((x, y));
-    }
-    
-    pub fn set_mouse_active(&mut self, active: bool) {
-        self.mouse_active = active;
-    }
-    
-    pub fn toggle_mode(&mut self) {
-        self.mode = match self.mode {
-            VisualMode::Normal => VisualMode::Vortex,
-            VisualMode::Vortex => VisualMode::Waves,
-            VisualMode::Waves => VisualMode::Rainbow,
-            VisualMode::Rainbow => VisualMode::Normal,
-        };
-    }
-    
-    pub fn add_lines(&mut self, count: usize) {
-        self.target_line_count = (self.target_line_count + count).min(SIMPLE_MAX_LINES * 3);
-        
-        // Immediately add some lines to reach target
-        while self.lines.len() < self.target_line_count && self.lines.len() < SIMPLE_MAX_LINES * 3 {
-            self.lines.push(SimpleLine::new(&mut self.rng));
-        }
-    }
-    
-    pub fn remove_lines(&mut self, count: usize) {
-        self.target_line_count = self.target_line_count.saturating_sub(count).max(10);
-        
-        // Remove lines if we have too many
-        while self.lines.len() > self.target_line_count && !self.lines.is_empty() {
-            self.lines.remove(0);
-        }
-    }
-    
-    // Get current info for the window title
-    pub fn get_status(&self) -> String {
-        format!("Mesmerise - Mode: {:?} - Lines: {} - Space: change mode, +/-: lines, E: explosion, 1-4: views, Mouse: interact",
-            self.mode, self.lines.len())
     }
 }
 

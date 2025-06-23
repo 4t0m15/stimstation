@@ -1,4 +1,3 @@
-use pixels::Pixels;
 use winit::keyboard::KeyCode;
 use winit_input_helper::WinitInputHelper;
 use crate::types::{ActiveSide, Color};
@@ -156,33 +155,44 @@ impl Menu {
         }
     }
 
-    pub fn render(&self, pixels: &mut Pixels) {
+    pub fn render(&self, frame: &mut [u8], width: u32, height: u32) {
         if !self.visible {
             return;
         }
         
-        let frame = pixels.frame_mut();
-        let width = crate::WIDTH;
-        let height = crate::HEIGHT;
-        
-        // Draw semi-transparent background overlay
+        // Draw semi-transparent background overlay - make it darker for better text visibility
         for y in 0..height as i32 {
             for x in 0..width as i32 {
                 let idx = 4 * (y as usize * width as usize + x as usize);
-                // Darken the existing pixel
-                frame[idx] = (frame[idx] as f32 * 0.3) as u8;
-                frame[idx+1] = (frame[idx+1] as f32 * 0.3) as u8;
-                frame[idx+2] = (frame[idx+2] as f32 * 0.3) as u8;
+                // Darken the existing pixel more for better contrast
+                frame[idx] = (frame[idx] as f32 * 0.15) as u8;
+                frame[idx+1] = (frame[idx+1] as f32 * 0.15) as u8;
+                frame[idx+2] = (frame[idx+2] as f32 * 0.15) as u8;
             }
         }
         
-        // Draw menu title
-        let title = "StimStation Visualizations";
+        // Draw opaque menu panel background for readability
+        let panel_x = (width as i32) / 4;
+        let panel_y = (height as i32) / 6 - 20;
+        let panel_w = (width as i32) / 2;
+        let panel_h = (height as i32) * 2 / 3 + 40;
+        draw_rectangle(
+            frame,
+            panel_x,
+            panel_y,
+            panel_w,
+            panel_h,
+            Color::new(0, 0, 0),
+            width
+        );
+        
+        // Draw menu title with larger, more visible text
+        let title = "STIMSTATION VISUALIZATIONS";
         draw_menu_text(
             frame, 
             title, 
-            width as i32 / 2 - (title.len() as i32 * 8), 
-            height as i32 / 4, 
+            width as i32 / 2 - (title.len() as i32 * 6), 
+            height as i32 / 6, 
             Color::new(255, 255, 255),
             width
         );
@@ -190,26 +200,26 @@ impl Menu {
         // Draw menu options
         for (i, option) in self.options.iter().enumerate() {
             let text_color = if i == self.active_index {
-                Color::new(255, 255, 0) // Yellow for selected
+                Color::new(255, 255, 0) // Bright yellow for selected
             } else {
-                Color::new(200, 200, 200) // Light gray for unselected
+                Color::new(220, 220, 220) // Bright gray for unselected
             };
             
-            let y_pos = height as i32 / 3 + i as i32 * 30;
+            let y_pos = height as i32 / 3 + i as i32 * 35;
             
-            // Draw selection rectangle for active item
+            // Draw selection rectangle for active item - make it more visible
             if i == self.active_index {
-                let rect_width = option.name.len() as i32 * 16 + 20;
-                let rect_height = 25;
+                let rect_width = option.name.len() as i32 * 12 + 40;
+                let rect_height = 30;
                 let rect_x = width as i32 / 2 - rect_width / 2;
-                let rect_y = y_pos - 20;
+                let rect_y = y_pos - 5;
                 draw_rectangle(
                     frame,
                     rect_x,
                     rect_y,
                     rect_width,
                     rect_height,
-                    Color::new(40, 40, 120),
+                    Color::new(60, 60, 150), // Brighter blue selection
                     width
                 );
             }
@@ -218,7 +228,7 @@ impl Menu {
             draw_menu_text(
                 frame,
                 &option.name,
-                width as i32 / 2 - (option.name.len() as i32 * 8),
+                width as i32 / 2 - (option.name.len() as i32 * 6),
                 y_pos,
                 text_color,
                 width
@@ -229,22 +239,22 @@ impl Menu {
                 draw_menu_text(
                     frame,
                     &option.description,
-                    width as i32 / 2 - (option.description.len() as i32 * 4),
+                    width as i32 / 2 - (option.description.len() as i32 * 3),
                     y_pos + 20,
-                    Color::new(180, 180, 180),
+                    Color::new(200, 200, 200),
                     width
                 );
             }
         }
         
         // Draw instructions
-        let instructions = "Use Arrow Keys to navigate and Enter to select";
+        let instructions = "USE ARROW KEYS TO NAVIGATE AND ENTER TO SELECT";
         draw_menu_text(
             frame,
             instructions,
-            width as i32 / 2 - (instructions.len() as i32 * 4),
-            height as i32 * 3/4,
-            Color::new(150, 150, 150),
+            width as i32 / 2 - (instructions.len() as i32 * 3),
+            height as i32 * 4/5,
+            Color::new(180, 180, 180),
             width
         );
     }

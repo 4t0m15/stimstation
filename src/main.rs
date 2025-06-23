@@ -2,7 +2,8 @@ use pixels::{Error, Pixels, SurfaceTexture};
 use std::sync::Arc;
 use winit::{
     dpi::LogicalSize,
-    event_loop::EventLoop,
+    event::{Event, WindowEvent},
+    event_loop::{EventLoop, ControlFlow},
     window::WindowBuilder,
 };
 use winit_input_helper::WinitInputHelper;
@@ -10,15 +11,15 @@ use winit_input_helper::WinitInputHelper;
 mod app;
 mod audio_handler;
 mod audio_playback;
-mod fibonacci_spiral;
+pub mod fibonacci_spiral;
 mod menu;
 mod mesmerise_circular;
 mod particle_fountain;
 mod pixel_utils;
-mod pythagoras;
-mod ray_pattern;
+pub mod pythagoras;
+pub mod ray_pattern;
 mod rendering;
-mod simple_proof;
+pub mod simple_proof;
 mod text_rendering;
 mod types;
 mod visualizations;
@@ -48,16 +49,30 @@ fn main() -> Result<(), Error> {
         Pixels::new(WIDTH, HEIGHT, surface_texture)?
     };
 
-    let mut app = App::new();
+    let mut app = App::new(&window);
+    
+    // Initial draw to ensure the window shows something
+    app.draw(pixels.frame_mut());
+    if let Err(err) = pixels.render() {
+        eprintln!("Initial render error: {err}");
+        return Err(err);
+    }
+    window.request_redraw();
 
     event_loop
         .run(move |event, window_target| {
+            // Set to Poll for continuous updates
+            window_target.set_control_flow(ControlFlow::Poll);
+            
+            // Update input helper with the event
             if input.update(&event) {
+                // Handle close requested
                 if input.close_requested() || app.should_quit() {
                     window_target.exit();
                     return;
                 }
 
+                // Handle window resize
                 if let Some(size) = input.window_resized() {
                     if let Err(err) = pixels.resize_surface(size.width, size.height) {
                         eprintln!("Pixels resize error: {err}");
@@ -66,17 +81,44 @@ fn main() -> Result<(), Error> {
                     }
                 }
 
+                // Update app logic
                 app.handle_input(&mut input, &window);
                 app.update();
-                app.draw(&mut pixels);
+                
+                // Draw frame
+                app.draw(pixels.frame_mut());
 
+                // Render the frame
                 if let Err(err) = pixels.render() {
                     eprintln!("Pixels render error: {err}");
                     app.quit();
                     return;
                 }
 
+                // Request redraw for continuous animation
                 window.request_redraw();
+            }
+            
+            // Handle redraw events
+            match event {
+                Event::WindowEvent {
+                    event: WindowEvent::RedrawRequested,
+                    ..
+                } => {
+                    // Update and render on every redraw
+                    app.update();
+                    app.draw(pixels.frame_mut());
+                    
+                    if let Err(err) = pixels.render() {
+                        eprintln!("Pixels render error: {err}");
+                        app.quit();
+                        return;
+                    }
+                    
+                    // Keep requesting redraws for animation
+                    window.request_redraw();
+                }
+                _ => {}
             }
         })
         .unwrap();

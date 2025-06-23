@@ -1,17 +1,11 @@
 // Ray pattern visualization inspired by the yellow and green rays image
-use ab_glyph::{Font as _, FontArc, Glyph, PxScale};
-use font_kit::{source::SystemSource, properties::Properties};
-use once_cell::sync::Lazy;
 use rand::prelude::*;
-use std::sync::Once;
 use winit::monitor::MonitorHandle;
-use crate::audio_handler::AudioVisualizer;
-use crate::audio_playback::{start_audio_thread, is_audio_thread_started};
+use crate::audio_integration::AudioIntegration;
+// use crate::text_renderer::TextRenderer;
 
-// Initialize once for thread safety
-static INIT: Once = Once::new();
-
-const RAY_COUNT: usize = 60;  // Number of rays for each source
+// Number of rays for each source
+const RAY_COUNT: usize = 60;
 
 // Sorting visualization data
 const SORT_ARRAY_SIZE: usize = 200; // A more reasonable size that won't cause overflow
@@ -282,72 +276,24 @@ impl SortVisualizer {
     }
 }
 
-// Static instance of audio visualizer (using external module)
-static mut AUDIO_VISUALIZER: Option<crate::audio_handler::AudioVisualizer> = None;
-
 // Static instances for sorting visualizers
 static mut TOP_SORTER: Option<SortVisualizer> = None;
 static mut BOTTOM_SORTER: Option<SortVisualizer> = None;
 static mut LEFT_SORTER: Option<SortVisualizer> = None;
 static mut RIGHT_SORTER: Option<SortVisualizer> = None;
 
-// HSV to RGB conversion helper for colorful visualization
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
-    let h = h % 360.0;
-    let c = v * s;
-    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
-    let m = v - c;
-    
-    let (r, g, b) = if h < 60.0 {
-        (c, x, 0.0)
-    } else if h < 120.0 {
-        (x, c, 0.0)
-    } else if h < 180.0 {
-        (0.0, c, x)
-    } else if h < 240.0 {
-        (0.0, x, c)
-    } else if h < 300.0 {
-        (x, 0.0, c)
-    } else {
-        (c, 0.0, x)
-    };
-    
-    [
-        ((r + m) * 255.0) as u8,
-        ((g + m) * 255.0) as u8,
-        ((b + m) * 255.0) as u8
-    ]
-}
-
-struct TextFragment {
-    text: String,
-    x: i32,
-    y: i32,
-    color: [u8; 3],
-    life: f32,
-    max_life: f32,
-    scale: f32,
-}
-
-static mut TEXT_FRAGMENTS: Option<Vec<TextFragment>> = None;
-static mut NEXT_FRAGMENT_TIME: Option<f32> = None;
+// Static instances for new modules
+static mut AUDIO_INTEGRATION: Option<AudioIntegration> = None;
+static mut TEXT_RENDERER: Option<TextRenderer> = None;
 static mut MONITOR_WIDTH: Option<u32> = None;
 static mut MONITOR_HEIGHT: Option<u32> = None;
 
-static FONT: Lazy<FontArc> = Lazy::new(|| {
-    let source = SystemSource::new();
-    let handle = source
-        .select_best_match(&[font_kit::family_name::FamilyName::Monospace], &Properties::new())
-        .expect("Failed to find a monospace font");
-
-    match handle.load() {
-        Ok(font) => {
-            let font_data = font.copy_font_data().expect("Failed to get font data");
-            FontArc::try_from_vec(font_data.to_vec()).expect("Failed to convert font to FontArc")
-        },
-        Err(_) => panic!("Failed to load font"),
-    }
-});
+// Ball positions and velocities
+static mut YELLOW_POS: Option<(f32, f32)> = None;
+static mut GREEN_POS: Option<(f32, f32)> = None;
+static mut YELLOW_VEL: Option<(f32, f32)> = None;
+static mut GREEN_VEL: Option<(f32, f32)> = None;
+static mut LAST_TIME: Option<f32> = None;
 
 pub fn set_monitor_dimensions(monitor: &MonitorHandle) {
     let size = monitor.size();
@@ -358,6 +304,7 @@ pub fn set_monitor_dimensions(monitor: &MonitorHandle) {
     }
 }
 
+// Draw the frame
 pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset: usize, buffer_width: u32) {
     // Get scale factors based on monitor dimensions
     let (scale_x, scale_y) = unsafe {
@@ -372,24 +319,15 @@ pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset
             _ => (1.0, 1.0) // Default scale if monitor dimensions aren't available
         }
     };
-    // Initialize text fragments if needed
+
     unsafe {
-        if TEXT_FRAGMENTS.is_none() {
-            TEXT_FRAGMENTS = Some(Vec::with_capacity(20));
-            NEXT_FRAGMENT_TIME = Some(time + 0.5); // Start adding fragments sooner
+        // Initialize audio integration if needed
+        if AUDIO_INTEGRATION.is_none() {
+            AUDIO_INTEGRATION = Some(AudioIntegration::new());
         }
         
-        // Initialize audio visualizer if needed
-        if AUDIO_VISUALIZER.is_none() {
-            AUDIO_VISUALIZER = Some(AudioVisualizer::new());
-        }
-        
-        // Start audio thread if it hasn't been started yet
-        if !is_audio_thread_started() {
-            // Start the audio thread for noise generation and analysis
-            if let Some(_handle) = start_audio_thread() {
-                println!("Audio thread started successfully");
-            }
+        if let Some(audio_integration) = AUDIO_INTEGRATION.as_mut() {
+            audio_integration.initialize();
         }
         
         // Initialize sorting visualizers if needed
@@ -404,19 +342,6 @@ pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset
         }
         if RIGHT_SORTER.is_none() {
             RIGHT_SORTER = Some(SortVisualizer::new(SortAlgorithm::Quick));
-        }
-        
-        // Add new text fragments occasionally
-        if let Some(next_time) = NEXT_FRAGMENT_TIME {
-            if time >= next_time {
-                // Add a new text fragment
-                add_random_text_fragment(width, height, time);
-                
-                // Schedule next fragment - more frequent appearance (0.2-1.0 seconds)
-                let mut rng = rand::thread_rng();
-                let delay = rng.gen_range(0.2..1.0);
-                NEXT_FRAGMENT_TIME = Some(time + delay);
-            }
         }
         
         // Initialize ball positions if they haven't been yet
@@ -639,14 +564,16 @@ pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset
             );
         }
         
-        if let Some(sorter) = BOTTOM_SORTER.as_mut() {
+        let sorter_ptr = BOTTOM_SORTER.as_mut().map(|s| s as *mut SortVisualizer);
+        if let Some(sorter_ptr) = sorter_ptr {
+            let sorter = &mut *sorter_ptr;
             sorter.update();
-            
+
             // Restart if completed
             if sorter.state == SortState::Completed && (time * 10.0).floor() % 10.0 == 0.0 {
                 sorter.restart();
             }
-            
+
             // Draw bottom sorter
             sorter.draw(
                 frame,
@@ -694,27 +621,16 @@ pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset
         }
         
         // Update and draw the audio visualizer
-        if let Some(audio_viz) = AUDIO_VISUALIZER.as_mut() {
+        if let Some(audio_integration) = AUDIO_INTEGRATION.as_mut() {
             let monitor_height = MONITOR_HEIGHT;
-            audio_viz.update(time, monitor_height);
-            audio_viz.draw(frame, width, height, x_offset, buffer_width);
+            audio_integration.update(time, monitor_height);
+            audio_integration.draw(frame, width, height, x_offset, buffer_width);
         }
         
-        // Update and draw text fragments
-        if let Some(ref mut fragments) = TEXT_FRAGMENTS {
-            // Update fragment lifetimes
-            fragments.retain_mut(|f| {
-                f.life -= 1.0 / 60.0; // Assuming 60 FPS
-                f.life > 0.0
-            });
-
-            // Add new fragments
-            add_random_text_fragment(width, height, time);
-
-            // Draw fragments
-            for fragment in fragments.iter() {
-                draw_text_fragment(frame, width, height, fragment, x_offset, buffer_width);
-            }
+        // Update and draw the text renderer
+        if let Some(text_renderer) = TEXT_RENDERER.as_mut() {
+            text_renderer.update(time, width, height);
+            text_renderer.draw(frame, width, height, x_offset, buffer_width);
         }
     }
 }
@@ -837,7 +753,7 @@ fn draw_filled_circle(frame: &mut [u8], width: u32, height: u32,
     for y in -radius..=radius {
         let h = (radius.pow(2) - y.pow(2)) as f32;
         if h < 0.0 { continue; }
-        
+
         let w = h.sqrt() as i32;
         for x in -w..=w {
             put_pixel(frame, width, height, center_x + x, center_y + y, color, x_offset, buffer_width);
@@ -920,8 +836,8 @@ pub fn teleport_yellow(x: f32, y: f32) { unsafe { YELLOW_POS = Some((x, y)); } }
 pub fn teleport_green(x: f32, y: f32) { unsafe { GREEN_POS = Some((x, y)); } }
 
 // Draw a shadow glow effect
-fn draw_shadow_glow(frame: &mut [u8], width: u32, height: u32, 
-                   center_x: i32, center_y: i32, 
+fn draw_shadow_glow(frame: &mut [u8], width: u32, height: u32,
+                   center_x: i32, center_y: i32,
                    radius: i32, color: &[u8; 4],
                    x_offset: usize, buffer_width: u32) {
     let radius_sq = radius * radius;
@@ -973,136 +889,17 @@ fn draw_shadow_glow(frame: &mut [u8], width: u32, height: u32,
     }
 }
 
-// Add a new random text fragment
-fn add_random_text_fragment(width: u32, height: u32, _time: f32) {
-    let mut rng = rand::thread_rng();
-
-    if rng.gen::<f64>() < 0.1 {
-        unsafe {
-            if let Some(fragments) = TEXT_FRAGMENTS.as_mut() {
-                if fragments.len() > 50 {
-                    return;
-                }
-
-                let _segment_length = rng.gen_range(20..80);
-                let text = format!("Text fragment {}", rng.gen_range(1..1000));
-
-                let x = rng.gen_range(0..width as i32);
-                let y = rng.gen_range(0..height as i32);
-
-                let scale = rng.gen_range(20.0..40.0);
-                let color = hsv_to_rgb(rng.gen_range(0.0..1.0), 0.8, 1.0);
-                let lifetime = rng.gen_range(5.0..15.0);
-
-                fragments.push(TextFragment {
-                    text,
-                    x,
-                    y,
-                    color,
-                    life: lifetime,
-                    max_life: lifetime,
-                    scale,
-                });
-            }
-        }
+fn put_pixel_safe(frame: &mut [u8], x: i32, y: i32, buffer_width: u32, height: u32, color: [u8; 4], x_offset: usize) {
+    if x < 0 || y < 0 || (x_offset + x as usize) >= buffer_width as usize || y >= height as i32 {
+        return;
     }
-}
-
-// Draw a text fragment with fading effect
-fn draw_text_fragment(
-    frame: &mut [u8],
-    _width: u32,
-    height: u32,
-    fragment: &TextFragment,
-    x_offset: usize,
-    buffer_width: u32,
-) {
-    let alpha = (fragment.life / fragment.max_life * 255.0) as u8;
-    let color = [fragment.color[0], fragment.color[1], fragment.color[2], alpha];
-
-    // Use ab_glyph to draw the text
-    let scale = PxScale::from(fragment.scale);
-    let glyphs = layout_paragraph(&FONT, scale, fragment.text.as_str());
-
-    for glyph in glyphs {
-        if let Some(outlined) = FONT.outline_glyph(glyph) {
-            let bounds = outlined.px_bounds();
-            outlined.draw(|px, py, v| {
-                let gx = px as i32 + bounds.min.x as i32;
-                let gy = py as i32 + bounds.min.y as i32;
-
-                let pixel_x = fragment.x + gx;
-                let pixel_y = fragment.y + gy;
-
-                let final_alpha = (v * (alpha as f32 / 255.0) * 255.0) as u8;
-
-                put_pixel_safe(
-                    frame,
-                    pixel_x,
-                    pixel_y,
-                    buffer_width,
-                    height,
-                    [color[0], color[1], color[2], final_alpha],
-                    x_offset,
-                );
-            });
-        }
-    }
-}
-
-fn layout_paragraph(font: &FontArc, scale: PxScale, text: &str) -> Vec<Glyph> {
-    let mut glyphs = Vec::new();
-    let mut x = 0.0;
-    let mut y = 0.0;
-    
-    for c in text.chars() {
-        if c == '\n' {
-            x = 0.0;
-            y += scale.y;
-            continue;
-        }
-        
-        let glyph_id = font.glyph_id(c);
-        let mut positioned = glyph_id.with_scale(scale);
-        positioned.position = ab_glyph::point(x, y);
-        glyphs.push(positioned);
-        x += font.h_advance_unscaled(glyph_id) * scale.x;
-    }
-    
-    glyphs
-}
-
-// In the put_pixel_safe function, add blending for smoother text
-fn put_pixel_safe(
-    frame: &mut [u8],
-    x: i32,
-    y: i32,
-    buffer_width: u32,
-    buffer_height: u32,
-    color: [u8; 4],
-    x_offset: usize,
-) {
-    if x >= 0 && x < buffer_width as i32 && y >= 0 && y < buffer_height as i32 {
-        let x_global = x as usize + x_offset;
-        let y_global = y as usize;
-
-        let idx = 4 * (y_global * buffer_width as usize + x_global);
-        if idx + 3 < frame.len() {
-            // Simple alpha blending
-            let bg_r = frame[idx] as f32;
-            let bg_g = frame[idx + 1] as f32;
-            let bg_b = frame[idx + 2] as f32;
-
-            let fg_r = color[0] as f32;
-            let fg_g = color[1] as f32;
-            let fg_b = color[2] as f32;
-            let fg_a = color[3] as f32 / 255.0;
-
-            frame[idx] = ((fg_r * fg_a) + (bg_r * (1.0 - fg_a))) as u8;
-            frame[idx + 1] = ((fg_g * fg_a) + (bg_g * (1.0 - fg_a))) as u8;
-            frame[idx + 2] = ((fg_b * fg_a) + (bg_b * (1.0 - fg_a))) as u8;
-            frame[idx + 3] = 255;
-        }
+    let idx = 4 * (y as usize * buffer_width as usize + x_offset + x as usize);
+    if idx + 3 < frame.len() {
+        let alpha = color[3] as f32 / 255.0;
+        frame[idx] = (frame[idx] as f32 * (1.0 - alpha) + color[0] as f32 * alpha) as u8;
+        frame[idx + 1] = (frame[idx + 1] as f32 * (1.0 - alpha) + color[1] as f32 * alpha) as u8;
+        frame[idx + 2] = (frame[idx + 2] as f32 * (1.0 - alpha) + color[2] as f32 * alpha) as u8;
+        frame[idx + 3] = 255;
     }
 }
 
@@ -1123,9 +920,3 @@ pub fn restart_sorters() {
         }
     }
 }
-
-static mut YELLOW_POS: Option<(f32, f32)> = None;
-static mut YELLOW_VEL: Option<(f32, f32)> = None;
-static mut GREEN_POS: Option<(f32, f32)> = None;
-static mut GREEN_VEL: Option<(f32, f32)> = None;
-static mut LAST_TIME: Option<f32> = None; 

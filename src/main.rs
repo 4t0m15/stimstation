@@ -10,6 +10,7 @@ use winit_input_helper::WinitInputHelper;
 
 mod app;
 mod audio_handler;
+mod audio_integration;
 mod audio_playback;
 pub mod fibonacci_spiral;
 mod menu;
@@ -19,7 +20,7 @@ mod pixel_utils;
 pub mod pythagoras;
 pub mod ray_pattern;
 mod rendering;
-pub mod simple_proof;
+mod simple_proof;
 mod text_rendering;
 mod types;
 mod visualizations;

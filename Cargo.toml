@@ -14,6 +14,12 @@ ab_glyph = "0.2"
 once_cell = "1.19"
 plotters = { version = "0.3.7", optional = true }
 
+# Performance-focused dependencies
+glam = "0.27.0"
+palette = "0.7.3"
+glyphon = "0.5.0"
+rayon = "1.8.0"
+
 # Visual proofs dependencies (excluding eframe)
 macroquad = { version = "0.4.14", optional = true }
 image = { version = "0.25.6", optional = true }

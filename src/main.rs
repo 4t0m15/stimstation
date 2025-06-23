@@ -271,6 +271,28 @@ impl FpsCounter {
 	}
 }
 
+// Add Buffers struct for persistent region buffers
+struct Buffers {
+    original: Vec<u8>,
+    circular: Vec<u8>,
+    full: Vec<u8>,
+    // Add more as needed for other regions
+}
+
+impl Buffers {
+    fn new() -> Self {
+        let original = vec![0u8; 4 * ORIGINAL_WIDTH as usize * ORIGINAL_HEIGHT as usize];
+        let circular = vec![0u8; 4 * mesmerise_circular::WIDTH as usize * mesmerise_circular::HEIGHT as usize];
+        let full = vec![0u8; 4 * WIDTH as usize * HEIGHT as usize];
+        Self { original, circular, full }
+    }
+    fn clear(&mut self) {
+        self.original.fill(0);
+        self.circular.fill(0);
+        self.full.fill(0);
+    }
+}
+
 impl World {
 	fn new() -> Self {
 		let mut rng = thread_rng();
@@ -607,19 +629,6 @@ fn draw_circle(frame: &mut [u8], x: i32, y: i32, radius: i32, color: [u8; 4], wi
 	}
 }
 
-// Helper function to safely set pixel with bounds checking
-fn set_pixel_safe(frame: &mut [u8], x: i32, y: i32, width: u32, height: u32, color: [u8; 4]) {
-    if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
-        let idx = 4 * (y as usize * width as usize + x as usize);
-        if idx + 3 < frame.len() {
-            frame[idx] = color[0];     // R
-            frame[idx + 1] = color[1]; // G
-            frame[idx + 2] = color[2]; // B
-            frame[idx + 3] = color[3]; // A
-        }
-    }
-}
-
 // Helper function for additive blending with bounds checking
 fn blend_pixel_safe(frame: &mut [u8], x: i32, y: i32, width: u32, height: u32, color: [u8; 4], intensity: f32) {
     if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
@@ -672,6 +681,8 @@ fn run_combined() -> Result<(), Error> {
 	let target_frame_time = Duration::from_secs_f32(1.0 / 60.0);
 	let mut fps_counter = FpsCounter::new();
 	let mut is_fullscreen = false;
+	// Initialize persistent buffers
+	let mut buffers = Buffers::new();
 
 	window.set_title("Mesmerise - Combined Visualizations");
 	let window_clone = Arc::clone(&window);
@@ -844,40 +855,34 @@ fn run_combined() -> Result<(), Error> {
 			} => {
 				if last_frame.elapsed() >= target_frame_time {
 					world.update();
-					
 					for pixel in pixels.frame_mut().chunks_exact_mut(4) {
 						pixel[0] = 0;
 						pixel[1] = 0;
 						pixel[2] = 0;
 						pixel[3] = 255;
 					}
-					
 					let elapsed = start_time.elapsed().as_secs_f32();
-					
+					// Clear buffers before use
+					buffers.clear();
 					match active_side {
-						ActiveSide::Original => draw_original(&mut pixels, &world),
-						ActiveSide::Circular => draw_circular(&mut pixels, elapsed),
-						ActiveSide::Full => draw_full_screen(&mut pixels, &world, elapsed),
+						ActiveSide::Original => draw_original_with_buffer(&mut pixels, &world, &mut buffers.original),
+						ActiveSide::Circular => draw_circular_with_buffer(&mut pixels, elapsed, &mut buffers.circular),
+						ActiveSide::Full => draw_full_screen_with_buffer(&mut pixels, &world, elapsed, &mut buffers),
 						ActiveSide::RayPattern => draw_ray_pattern(&mut pixels, elapsed),
 						ActiveSide::Pythagoras => draw_pythagoras(&mut pixels, elapsed),
 						ActiveSide::FibonacciSpiral => draw_fibonacci_spiral(&mut pixels, elapsed),
 						ActiveSide::SimpleProof => draw_simple_proof(&mut pixels, elapsed),
 					}
-					
 					let frame = pixels.frame_mut();
 					draw_particle_fountain(frame, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, elapsed);
-					
 					fps_counter.update();
-					
 					let fps_text = format!("FPS: {:.1}", fps_counter.fps());
-					draw_text(frame, &fps_text, 10, HEIGHT as i32 - 30, [255, 255, 0, 255], WIDTH);
-					
+					draw_text_ab_glyph(frame, &fps_text, 10.0, (HEIGHT - 30) as f32, [255, 255, 0, 255], WIDTH);
 					if let Err(err) = pixels.render() {
 						eprintln!("Pixels render error: {err}");
 						window_target.exit();
 						return;
 					}
-					
 					last_frame = Instant::now();
 					window_clone.request_redraw();
 				}
@@ -892,105 +897,81 @@ fn run_combined() -> Result<(), Error> {
 	Ok(())
 }
 
-// Draw the original visualization on the left half of the screen
-fn draw_original(pixels: &mut Pixels, world: &World) {
-	let mut original_buffer = vec![0u8; 4 * ORIGINAL_WIDTH as usize * ORIGINAL_HEIGHT as usize];
-	world.draw(&mut original_buffer);
-	
+// Refactored draw_original to use persistent buffer
+fn draw_original_with_buffer(pixels: &mut Pixels, world: &World, buffer: &mut Vec<u8>) {
+	world.draw(buffer);
 	let frame = pixels.frame_mut();
 	for y in 0..ORIGINAL_HEIGHT as usize {
 		for x in 0..ORIGINAL_WIDTH as usize {
 			let src_idx = 4 * (y * ORIGINAL_WIDTH as usize + x);
 			let dst_idx = 4 * (y * WIDTH as usize + x);
-			
-			if src_idx + 3 < original_buffer.len() && dst_idx + 3 < frame.len() {
-				frame[dst_idx] = original_buffer[src_idx];
-				frame[dst_idx + 1] = original_buffer[src_idx + 1];
-				frame[dst_idx + 2] = original_buffer[src_idx + 2];
-				frame[dst_idx + 3] = original_buffer[src_idx + 3];
+			if src_idx + 3 < buffer.len() && dst_idx + 3 < frame.len() {
+				frame[dst_idx] = buffer[src_idx];
+				frame[dst_idx + 1] = buffer[src_idx + 1];
+				frame[dst_idx + 2] = buffer[src_idx + 2];
+				frame[dst_idx + 3] = buffer[src_idx + 3];
 			}
 		}
 	}
 }
 
-// Draw the circular visualization on the right half of the screen
-fn draw_circular(pixels: &mut Pixels, time: f32) {
-	let circular_width = mesmerise_circular::WIDTH;
-	let circular_height = mesmerise_circular::HEIGHT;
-	let mut circular_buffer = vec![0u8; 4 * circular_width as usize * circular_height as usize];
-	mesmerise_circular::draw_frame(&mut circular_buffer, time);
-	
+// Refactored draw_circular to use persistent buffer
+fn draw_circular_with_buffer(pixels: &mut Pixels, time: f32, buffer: &mut Vec<u8>) {
+	mesmerise_circular::draw_frame(buffer, time);
 	let frame = pixels.frame_mut();
 	let x_offset = ORIGINAL_WIDTH as usize;
-	
-	for y in 0..circular_height as usize {
-		for x in 0..circular_width as usize {
-			let src_idx = 4 * (y * circular_width as usize + x);
+	let circular_width = mesmerise_circular::WIDTH as usize;
+	let circular_height = mesmerise_circular::HEIGHT as usize;
+	for y in 0..circular_height {
+		for x in 0..circular_width {
+			let src_idx = 4 * (y * circular_width + x);
 			let dst_idx = 4 * (y * WIDTH as usize + (x + x_offset));
-			
-			if src_idx + 3 < circular_buffer.len() && dst_idx + 3 < frame.len() {
-				frame[dst_idx] = circular_buffer[src_idx];
-				frame[dst_idx + 1] = circular_buffer[src_idx + 1];
-				frame[dst_idx + 2] = circular_buffer[src_idx + 2];
-				frame[dst_idx + 3] = circular_buffer[src_idx + 3];
+			if src_idx + 3 < buffer.len() && dst_idx + 3 < frame.len() {
+				frame[dst_idx] = buffer[src_idx];
+				frame[dst_idx + 1] = buffer[src_idx + 1];
+				frame[dst_idx + 2] = buffer[src_idx + 2];
+				frame[dst_idx + 3] = buffer[src_idx + 3];
 			}
 		}
 	}
 }
 
-// Draw the full screen visualization with multiple sections
-fn draw_full_screen(pixels: &mut Pixels, world: &World, time: f32) {
-	for pixel in pixels.frame_mut().chunks_exact_mut(4) {
-		pixel[0] = 0;
-		pixel[1] = 0;
-		pixel[2] = 0;
-		pixel[3] = 255;
-	}
-	
+// Refactored draw_full_screen to use persistent buffers
+fn draw_full_screen_with_buffer(pixels: &mut Pixels, world: &World, time: f32, buffers: &mut Buffers) {
 	let frame = pixels.frame_mut();
-	
 	// Original visualization (top-left)
-	let mut original_buffer = vec![0u8; 4 * ORIGINAL_WIDTH as usize * ORIGINAL_HEIGHT as usize];
-	world.draw(&mut original_buffer);
-	
+	world.draw(&mut buffers.original);
 	for y in 0..ORIGINAL_HEIGHT as usize {
 		for x in 0..ORIGINAL_WIDTH as usize {
 			let src_idx = 4 * (y * ORIGINAL_WIDTH as usize + x);
 			let dst_idx = 4 * (y * WIDTH as usize + x);
-			
-			if src_idx + 3 < original_buffer.len() && dst_idx + 3 < frame.len() {
-				frame[dst_idx] = original_buffer[src_idx];
-				frame[dst_idx + 1] = original_buffer[src_idx + 1];
-				frame[dst_idx + 2] = original_buffer[src_idx + 2];
-				frame[dst_idx + 3] = original_buffer[src_idx + 3];
+			if src_idx + 3 < buffers.original.len() && dst_idx + 3 < frame.len() {
+				frame[dst_idx] = buffers.original[src_idx];
+				frame[dst_idx + 1] = buffers.original[src_idx + 1];
+				frame[dst_idx + 2] = buffers.original[src_idx + 2];
+				frame[dst_idx + 3] = buffers.original[src_idx + 3];
 			}
 		}
 	}
-	
 	// Circular visualization (top-right)
-	let circular_width = mesmerise_circular::WIDTH;
-	let circular_height = mesmerise_circular::HEIGHT;
-	let mut circular_buffer = vec![0u8; 4 * circular_width as usize * circular_height as usize];
-	mesmerise_circular::draw_frame(&mut circular_buffer, time);
-	
+	mesmerise_circular::draw_frame(&mut buffers.circular, time);
 	let x_offset = ORIGINAL_WIDTH as usize;
-	for y in 0..circular_height as usize {
-		for x in 0..circular_width as usize {
-			let src_idx = 4 * (y * circular_width as usize + x);
+	let circular_width = mesmerise_circular::WIDTH as usize;
+	let circular_height = mesmerise_circular::HEIGHT as usize;
+	for y in 0..circular_height {
+		for x in 0..circular_width {
+			let src_idx = 4 * (y * circular_width + x);
 			let dst_idx = 4 * (y * WIDTH as usize + (x + x_offset));
-			
-			if src_idx + 3 < circular_buffer.len() && dst_idx + 3 < frame.len() {
-				frame[dst_idx] = circular_buffer[src_idx];
-				frame[dst_idx + 1] = circular_buffer[src_idx + 1];
-				frame[dst_idx + 2] = circular_buffer[src_idx + 2];
-				frame[dst_idx + 3] = circular_buffer[src_idx + 3];
+			if src_idx + 3 < buffers.circular.len() && dst_idx + 3 < frame.len() {
+				frame[dst_idx] = buffers.circular[src_idx];
+				frame[dst_idx + 1] = buffers.circular[src_idx + 1];
+				frame[dst_idx + 2] = buffers.circular[src_idx + 2];
+				frame[dst_idx + 3] = buffers.circular[src_idx + 3];
 			}
 		}
 	}
-	
 	// Particle fountain (bottom-left)
 	draw_particle_fountain(frame, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, time);
-	
 	// Ray pattern visualization (bottom-right)
 	let ray_width = ORIGINAL_WIDTH;
 	let ray_height = ORIGINAL_HEIGHT;
@@ -1230,168 +1211,6 @@ fn draw_ray_pattern(pixels: &mut Pixels, time: f32) {
 	// Draw the ray pattern directly to the frame buffer using the full width and height
 	// Use the actual WIDTH and HEIGHT for ray pattern to fill the entire buffer
 	ray_pattern::draw_frame(frame, WIDTH, HEIGHT, time, 0, WIDTH);
-}
-
-// Draw text with a simple font
-fn draw_text(frame: &mut [u8], text: &str, x: i32, y: i32, color: [u8; 4], width: u32) {
-	let char_width = 8;
-	let char_height = 15;
-	let height = frame.len() / (4 * width as usize);
-	
-	// Early return if text would be completely off-screen
-	if y + char_height < 0 || y >= height as i32 {
-		return;
-	}
-	
-	for (i, c) in text.chars().enumerate() {
-		let cx = x + (i as i32 * char_width);
-		
-		// Skip if this character is outside frame
-		if cx + char_width < 0 || cx >= width as i32 {
-			continue;
-		}
-		
-		// Draw character (simple 7-segment style)
-		match c {
-			'F' => {
-				draw_segment(frame, cx, y, true, false, true, false, true, false, false, color, width);
-			},
-			'P' => {
-				draw_segment(frame, cx, y, true, false, true, true, true, false, false, color, width);
-			},
-			'S' => {
-				draw_segment(frame, cx, y, true, true, false, true, false, true, true, color, width);
-			},
-			':' => {
-				// Draw two dots
-				for dy in 0..2 {
-					for dx in 0..2 {
-						set_pixel_safe(frame, cx + 3 + dx, y + 4 + dy, width, height as u32, color);
-						set_pixel_safe(frame, cx + 3 + dx, y + 10 + dy, width, height as u32, color);
-					}
-				}
-			},
-			'.' => {
-				// Draw a single dot
-				for dy in 0..2 {
-					for dx in 0..2 {
-						set_pixel_safe(frame, cx + 3 + dx, y + char_height - 3 + dy, width, height as u32, color);
-					}
-				}
-			},
-			'0' => {
-				draw_segment(frame, cx, y, true, true, true, false, true, true, true, color, width);
-			},
-			'1' => {
-				draw_segment(frame, cx, y, false, false, true, false, false, true, false, color, width);
-			},
-			'2' => {
-				draw_segment(frame, cx, y, true, true, false, true, true, false, true, color, width);
-			},
-			'3' => {
-				draw_segment(frame, cx, y, true, true, true, true, false, false, true, color, width);
-			},
-			'4' => {
-				draw_segment(frame, cx, y, false, false, true, true, false, true, true, color, width);
-			},
-			'5' => {
-				draw_segment(frame, cx, y, true, true, true, true, false, true, false, color, width);
-			},
-			'6' => {
-				draw_segment(frame, cx, y, true, true, true, true, true, true, false, color, width);
-			},
-			'7' => {
-				draw_segment(frame, cx, y, true, false, true, false, false, true, false, color, width);
-			},
-			'8' => {
-				draw_segment(frame, cx, y, true, true, true, true, true, true, true, color, width);
-			},
-			'9' => {
-				draw_segment(frame, cx, y, true, true, true, true, false, true, true, color, width);
-			},
-			' ' => {},
-			_ => {
-				// Draw a rectangle for unknown characters
-				for dy in 0..char_height {
-					for dx in 0..char_width {
-						if dx == 0 || dx == char_width - 1 || dy == 0 || dy == char_height - 1 {
-							set_pixel_safe(frame, cx + dx, y + dy, width, height as u32, color);
-						}
-					}
-				}
-			}
-		}
-	}
-}
-
-// Helper function to draw 7-segment display style characters
-// Segments: a=top, b=top-right, c=bottom-right, d=bottom, e=bottom-left, f=top-left, g=middle
-fn draw_segment(frame: &mut [u8], x: i32, y: i32, a: bool, b: bool, c: bool, d: bool, e: bool, f: bool, g: bool, color: [u8; 4], width: u32) {
-	let height = frame.len() / (4 * width as usize);
-	let thickness = 2;
-	
-	// Segment a (top horizontal)
-	if a {
-		for dy in 0..thickness {
-			for dx in 0..6 {
-				set_pixel_safe(frame, x + 1 + dx, y + dy, width, height as u32, color);
-			}
-		}
-	}
-	
-	// Segment b (top-right vertical)
-	if b {
-		for dy in 0..7 {
-			for dx in 0..thickness {
-				set_pixel_safe(frame, x + 6 - dx, y + 1 + dy, width, height as u32, color);
-			}
-		}
-	}
-	
-	// Segment c (bottom-right vertical)
-	if c {
-		for dy in 0..7 {
-			for dx in 0..thickness {
-				set_pixel_safe(frame, x + 6 - dx, y + 8 + dy, width, height as u32, color);
-			}
-		}
-	}
-	
-	// Segment d (bottom horizontal)
-	if d {
-		for dy in 0..thickness {
-			for dx in 0..6 {
-				set_pixel_safe(frame, x + 1 + dx, y + 14 - dy, width, height as u32, color);
-			}
-		}
-	}
-	
-	// Segment e (bottom-left vertical)
-	if e {
-		for dy in 0..7 {
-			for dx in 0..thickness {
-				set_pixel_safe(frame, x + dx, y + 8 + dy, width, height as u32, color);
-			}
-		}
-	}
-	
-	// Segment f (top-left vertical)
-	if f {
-		for dy in 0..7 {
-			for dx in 0..thickness {
-				set_pixel_safe(frame, x + dx, y + 1 + dy, width, height as u32, color);
-			}
-		}
-	}
-	
-	// Segment g (middle horizontal)
-	if g {
-		for dy in 0..thickness {
-			for dx in 0..6 {
-				set_pixel_safe(frame, x + 1 + dx, y + 7 + dy, width, height as u32, color);
-			}
-		}
-	}
 }
 
 // Pythagoras visualization - simpler version of the macroquad example
@@ -1868,5 +1687,53 @@ fn draw_simple_text(
                 }
             }
         }
+    }
+}
+
+// Add at the top, after other mod declarations:
+mod pixel_utils;
+use pixel_utils::*;
+
+// Add at the bottom of the file:
+use ab_glyph::{FontArc, PxScale, point, Glyph, GlyphId};
+use ab_glyph::Font;
+
+static FONT_DATA: &[u8] = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+
+fn draw_text_ab_glyph(
+    frame: &mut [u8],
+    text: &str,
+    x: f32,
+    y: f32,
+    color: [u8; 4],
+    width: u32,
+) {
+    let font = FontArc::try_from_slice(FONT_DATA).expect("Font load failed");
+    let scale = PxScale::from(24.0);
+    let mut caret = point(x, y + 24.0); // y is baseline
+    let height = frame.len() / (4 * width as usize);
+    for c in text.chars() {
+        let glyph_id = font.glyph_id(c);
+        let glyph = Glyph {
+            id: glyph_id,
+            scale,
+            position: caret,
+        };
+        if let Some(outlined) = font.outline_glyph(glyph.clone()) {
+            outlined.draw(|gx, gy, v| {
+                let px = caret.x as i32 + gx as i32;
+                let py = (caret.y as i32 - 24) + gy as i32;
+                if px >= 0 && px < width as i32 && py >= 0 && py < height as i32 {
+                    let idx = 4 * (py as usize * width as usize + px as usize);
+                    let alpha = (v * color[3] as f32) as u8;
+                    frame[idx] = color[0];
+                    frame[idx + 1] = color[1];
+                    frame[idx + 2] = color[2];
+                    frame[idx + 3] = alpha;
+                }
+            });
+        }
+        let h_advance = font.h_advance_unscaled(glyph_id);
+        caret.x += h_advance * scale.x;
     }
 }

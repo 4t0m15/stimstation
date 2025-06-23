@@ -1,8 +1,7 @@
-use crate::types::{World, Line, Particle, Position, Velocity, Color, VisualMode, hsv_to_rgb, WIDTH, HEIGHT, MAX_LINES};
+use crate::types::{World, Line, Particle, Position, Color, VisualMode, hsv_to_rgb, WIDTH, HEIGHT, MAX_LINES};
 use crate::types::{SimpleWorld, SimpleLine, SimpleParticle, SimplePos, SimpleColor, FpsCounter, Buffers};
 use crate::pixel_utils::*;
 use crate::mesmerise_circular;
-use glam::Vec2;
 use rand::prelude::*;
 use rayon::prelude::*;
 use std::time::{Instant, Duration};

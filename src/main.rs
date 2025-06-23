@@ -26,6 +26,7 @@ mod particle_fountain;
 mod pixel_utils;
 mod app;
 mod text_rendering;
+mod menu;
 
 // Import only what we actually need
 use rand::rngs::ThreadRng;
@@ -33,6 +34,7 @@ use rand::Rng;
 use rand::thread_rng;
 use crate::pixel_utils::blend_pixel_safe;
 use crate::types::{FpsCounter, Buffers};
+use crate::menu::Menu;
 
 // Combined window dimensions
 const WIDTH: u32 = 1600;
@@ -45,14 +47,15 @@ const ORIGINAL_HEIGHT: u32 = 400;  // Reduced height for original
 
 // Flag to control which part of the visualization is active
 #[derive(Debug, PartialEq, Copy, Clone)]
-enum ActiveSide {
+pub enum ActiveSide {
 	Original,  // Original lines only
 	Circular,  // Circular only
 	Full,      // Full screen with all visualizations
 	RayPattern, // Only show the ray pattern
 	Pythagoras, // Pythagoras visualization
 	FibonacciSpiral, // Fibonacci spiral visualization
-	SimpleProof  // Simple proof visualization
+	SimpleProof,  // Simple proof visualization
+	Combined  // All visualizations combined in one screen
 }
 
 #[derive(Debug)]
@@ -601,17 +604,29 @@ fn run_combined() -> Result<(), Error> {
 	let target_frame_time = Duration::from_secs_f32(1.0 / 60.0);
 	let mut fps_counter = FpsCounter::new();
 	let mut is_fullscreen = false;
+	let mut show_help = false; // Add toggle for showing keyboard guide
 	// Initialize persistent buffers
 	let mut buffers = Buffers::new();
+	// Initialize menu system
+	let mut menu = Menu::new();
 
-	window.set_title("Mesmerise - Combined Visualizations");
+	window.set_title("Mesmerise - Press H for controls");
 	let window_clone = Arc::clone(&window);
 
 	event_loop.run(move |event, window_target| {
 		if input.update(&event) {
-			if input.key_pressed(KeyCode::Escape) || input.close_requested() {
+			if input.close_requested() {
 				window_target.exit();
 				return;
+			}
+			
+			// Handle escape key for menu toggling
+			if input.key_pressed(KeyCode::Escape) {
+				if !menu.is_visible() {
+					menu.toggle_visibility(start_time.elapsed().as_secs_f32());
+				} else {
+					menu.toggle_visibility(start_time.elapsed().as_secs_f32());
+				}
 			}
 			
 			if input.key_pressed(KeyCode::Space) {
@@ -619,7 +634,18 @@ fn run_combined() -> Result<(), Error> {
 				window_clone.set_title(&format!("Mesmerise - Combined - {}", world.get_status()));
 			}
 
-			if input.key_pressed(KeyCode::F11) {
+			// Toggle help display with H key
+			if input.key_pressed(KeyCode::KeyH) {
+				show_help = !show_help;
+				if show_help {
+					window_clone.set_title("Mesmerise - Keyboard Guide Displayed");
+				} else {
+					window_clone.set_title("Mesmerise - Press H for controls");
+				}
+			}
+
+			// Toggle fullscreen with F11
+			if input.key_pressed(KeyCode::KeyF) || input.key_pressed(KeyCode::F11) {
 				is_fullscreen = !is_fullscreen;
 				window_clone.set_fullscreen(if is_fullscreen {
 					Some(winit::window::Fullscreen::Borderless(None))
@@ -702,7 +728,48 @@ fn run_combined() -> Result<(), Error> {
 				}
 			}
 			
-			// View switching
+			// Handle menu input
+			menu.handle_input(&input, start_time.elapsed().as_secs_f32());
+			
+			// Check if selection was made in the menu
+			if menu.has_made_selection() {
+				active_side = menu.get_selected_visualization();
+				menu.reset_selection();
+				
+				// Update window title based on selection
+				match active_side {
+					ActiveSide::Original => {
+						window_clone.set_title("Mesmerise - Original Visualization Only");
+					},
+					ActiveSide::Circular => {
+						window_clone.set_title("Mesmerise - Circular Visualization Only");
+					},
+					ActiveSide::Full => {
+						window_clone.set_title("Mesmerise - Combined Visualizations (Grid)");
+					},
+					ActiveSide::RayPattern => {
+						window_clone.set_title("Mesmerise - Ray Pattern - WASD/Arrows: Move Balls, Mouse: Teleport");
+						if !is_fullscreen {
+							is_fullscreen = true;
+							window_clone.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+						}
+					},
+					ActiveSide::Pythagoras => {
+						window_clone.set_title("Mesmerise - Pythagoras Theorem Visualization");
+					},
+					ActiveSide::FibonacciSpiral => {
+						window_clone.set_title("Mesmerise - Fibonacci Spiral Visualization");
+					},
+					ActiveSide::SimpleProof => {
+						window_clone.set_title("Mesmerise - Simple Proof Visualization");
+					},
+					ActiveSide::Combined => {
+						window_clone.set_title("Mesmerise - All Visualizations Combined");
+					},
+				}
+			}
+			
+			// Fallback keyboard shortcuts for view switching
 			active_side = match () {
 				_ if input.key_pressed(KeyCode::Digit1) => {
 					window_clone.set_title("Mesmerise - Original Visualization Only");
@@ -713,11 +780,11 @@ fn run_combined() -> Result<(), Error> {
 					ActiveSide::Circular
 				},
 				_ if input.key_pressed(KeyCode::Digit3) => {
-					window_clone.set_title("Mesmerise - Combined Visualizations");
+					window_clone.set_title("Mesmerise - Combined Visualizations (Grid)");
 					ActiveSide::Full
 				},
 				_ if input.key_pressed(KeyCode::Digit4) => {
-					window_clone.set_title("Mesmerise - Ray Pattern - WASD/Arrows: Move Balls, Mouse: Teleport - With Sorting Visualizations");
+					window_clone.set_title("Mesmerise - Ray Pattern - WASD/Arrows: Move Balls, Mouse: Teleport");
 					if !is_fullscreen {
 						is_fullscreen = true;
 						window_clone.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
@@ -735,6 +802,10 @@ fn run_combined() -> Result<(), Error> {
 				_ if input.key_pressed(KeyCode::Digit7) => {
 					window_clone.set_title("Mesmerise - Simple Proof Visualization");
 					ActiveSide::SimpleProof
+				},
+				_ if input.key_pressed(KeyCode::Digit8) => {
+					window_clone.set_title("Mesmerise - All Visualizations Combined");
+					ActiveSide::Combined
 				},
 				_ => active_side,
 			};
@@ -792,11 +863,24 @@ fn run_combined() -> Result<(), Error> {
 						ActiveSide::Pythagoras => pythagoras::draw_frame(&mut pixels, elapsed),
 						ActiveSide::FibonacciSpiral => fibonacci_spiral::draw_frame(&mut pixels, elapsed),
 						ActiveSide::SimpleProof => simple_proof::draw_frame(&mut pixels, elapsed),
+						ActiveSide::Combined => draw_all_combined(&mut pixels, &world, elapsed),
 					}
 					let frame = pixels.frame_mut();
 					fps_counter.update();
+					
+					// Draw FPS counter
 					let fps_text = format!("FPS: {:.1}", fps_counter.fps());
 					draw_text_ab_glyph(frame, &fps_text, 10.0, (HEIGHT - 30) as f32, [255, 255, 0, 255], WIDTH);
+					
+					// Draw help if enabled
+					if show_help {
+						draw_keyboard_guide(frame, WIDTH);
+					}
+					
+					// Update and render menu if visible
+					menu.update(start_time.elapsed().as_secs_f32());
+					menu.render(&mut pixels);
+					
 					if let Err(err) = pixels.render() {
 						eprintln!("Pixels render error: {err}");
 						window_target.exit();
@@ -960,4 +1044,209 @@ fn draw_text_ab_glyph(
         let h_advance = font.h_advance_unscaled(glyph_id);
         caret.x += h_advance * scale.x;
     }
+}
+
+// Adding a keyboard guide function to show users the controls
+fn draw_keyboard_guide(frame: &mut [u8], width: u32) {
+    // Draw background
+    let guide_width = 400;
+    let guide_height = 200;
+    let x_start = (width as usize - guide_width) / 2;
+    let y_start = 50;
+    
+    // Draw semi-transparent background
+    for y in y_start..(y_start + guide_height) {
+        for x in x_start..(x_start + guide_width) {
+            let idx = 4 * (y * width as usize + x);
+            if idx + 3 < frame.len() {
+                // Semi-transparent black background
+                frame[idx] = (frame[idx] as f32 * 0.3) as u8;     // R
+                frame[idx + 1] = (frame[idx + 1] as f32 * 0.3) as u8; // G
+                frame[idx + 2] = (frame[idx + 2] as f32 * 0.3) as u8; // B
+                frame[idx + 3] = 255; // A
+            }
+        }
+    }
+    
+    // Draw guide text
+    let controls = [
+        "Keyboard Controls:",
+        "1-8: Switch visualization modes",
+        "Space: Change visual effect",
+        "+/-: Add/remove lines",
+        "E: Create explosion",
+        "F: Toggle fullscreen",
+        "H: Show/hide this help",
+        "Esc: Exit"
+    ];
+    
+    let mut y_pos = y_start + 20;
+    for text in controls.iter() {
+        draw_text_ab_glyph(
+            frame,
+            text,
+            x_start as f32 + 20.0,
+            y_pos as f32,
+            [255, 255, 255, 255],
+            width,
+        );
+        y_pos += 20;
+    }
+}
+
+// Draw all visualizations combined into one screen
+fn draw_all_combined(pixels: &mut Pixels, world: &World, time: f32) {
+    let frame = pixels.frame_mut();
+    
+    // Clear with a starfield background
+    for pixel in frame.chunks_exact_mut(4) {
+        pixel[0] = 0;  // R
+        pixel[1] = 0;  // G
+        pixel[2] = 10; // B (slight blue tint)
+        pixel[3] = 255; // A
+    }
+    
+    // Add stars to the background
+    let star_count = 200;
+    let mut rng = thread_rng();
+    for _ in 0..star_count {
+        let x = rng.gen_range(0..WIDTH as usize);
+        let y = rng.gen_range(0..HEIGHT as usize);
+        let brightness = rng.gen_range(100..255);
+        let idx = 4 * (y * WIDTH as usize + x);
+        if idx + 3 < frame.len() {
+            frame[idx] = brightness;     // R
+            frame[idx + 1] = brightness; // G
+            frame[idx + 2] = brightness; // B
+        }
+    }
+    
+    // Divide the screen into 4 quadrants for different visualizations
+    let half_width = WIDTH / 2;
+    let half_height = HEIGHT / 2;
+    
+    // Prepare buffers for each visualization
+    let ray_buffer = &mut vec![0u8; 4 * WIDTH as usize * HEIGHT as usize];
+    let particle_buffer = &mut vec![0u8; 4 * WIDTH as usize * HEIGHT as usize];
+    let world_buffer = &mut vec![0u8; 4 * WIDTH as usize * HEIGHT as usize];
+    let circular_buffer = &mut vec![0u8; 4 * WIDTH as usize * HEIGHT as usize];
+    
+    // Draw each visualization into its buffer
+    ray_pattern::draw_frame(ray_buffer, WIDTH, HEIGHT, time, 0, WIDTH);
+    particle_fountain::draw_frame(particle_buffer, WIDTH, HEIGHT, time);
+    world.draw(world_buffer);
+    
+    // Special handling for mesmerise circular which has fixed dimensions
+    let circular_temp = &mut vec![0u8; 4 * mesmerise_circular::WIDTH as usize * mesmerise_circular::HEIGHT as usize];
+    mesmerise_circular::draw_frame(circular_temp, time);
+    
+    // Copy mesmerise circular to our full-size buffer with scaling
+    let scale_x = WIDTH as f32 / mesmerise_circular::WIDTH as f32;
+    let scale_y = HEIGHT as f32 / mesmerise_circular::HEIGHT as f32;
+    for y in 0..HEIGHT as usize {
+        for x in 0..WIDTH as usize {
+            let src_x = (x as f32 / scale_x) as usize;
+            let src_y = (y as f32 / scale_y) as usize;
+            if src_x < mesmerise_circular::WIDTH as usize && src_y < mesmerise_circular::HEIGHT as usize {
+                let src_idx = 4 * (src_y * mesmerise_circular::WIDTH as usize + src_x);
+                let dst_idx = 4 * (y * WIDTH as usize + x);
+                if src_idx + 3 < circular_temp.len() && dst_idx + 3 < circular_buffer.len() {
+                    circular_buffer[dst_idx] = circular_temp[src_idx];
+                    circular_buffer[dst_idx + 1] = circular_temp[src_idx + 1];
+                    circular_buffer[dst_idx + 2] = circular_temp[src_idx + 2];
+                    circular_buffer[dst_idx + 3] = circular_temp[src_idx + 3];
+                }
+            }
+        }
+    }
+    
+    // Draw dividing lines
+    let divider_color = [200, 200, 200, 255]; // Light gray
+    let divider_width = 3;
+    
+    // Horizontal divider
+    for y in (half_height - divider_width/2)..(half_height + divider_width/2) {
+        for x in 0..WIDTH as usize {
+            let idx = 4 * (y as usize * WIDTH as usize + x);
+            if idx + 3 < frame.len() {
+                frame[idx] = divider_color[0];
+                frame[idx + 1] = divider_color[1];
+                frame[idx + 2] = divider_color[2];
+                frame[idx + 3] = divider_color[3];
+            }
+        }
+    }
+    
+    // Vertical divider
+    for x in (half_width - divider_width/2)..(half_width + divider_width/2) {
+        for y in 0..HEIGHT as usize {
+            let idx = 4 * (y * WIDTH as usize + x as usize);
+            if idx + 3 < frame.len() {
+                frame[idx] = divider_color[0];
+                frame[idx + 1] = divider_color[1];
+                frame[idx + 2] = divider_color[2];
+                frame[idx + 3] = divider_color[3];
+            }
+        }
+    }
+    
+    // Blend each visualization into its quadrant
+    for y in 0..HEIGHT as usize {
+        for x in 0..WIDTH as usize {
+            let idx = 4 * (y * WIDTH as usize + x);
+            
+            if idx + 3 >= frame.len() {
+                continue;
+            }
+            
+            // Skip divider lines
+            let on_x_divider = x >= (half_width - divider_width/2) as usize && x < (half_width + divider_width/2) as usize;
+            let on_y_divider = y >= (half_height - divider_width/2) as usize && y < (half_height + divider_width/2) as usize;
+            if on_x_divider || on_y_divider {
+                continue;
+            }
+            
+            // Determine which quadrant we're in
+            let x_left = x < half_width as usize;
+            let y_top = y < half_height as usize;
+            
+            if x_left && y_top {
+                // Top-left: Ray pattern
+                frame[idx] = ray_buffer[idx];
+                frame[idx + 1] = ray_buffer[idx + 1];
+                frame[idx + 2] = ray_buffer[idx + 2];
+            } else if !x_left && y_top {
+                // Top-right: Mesmerise circular
+                frame[idx] = circular_buffer[idx];
+                frame[idx + 1] = circular_buffer[idx + 1];
+                frame[idx + 2] = circular_buffer[idx + 2];
+            } else if x_left && !y_top {
+                // Bottom-left: World lines
+                frame[idx] = world_buffer[idx];
+                frame[idx + 1] = world_buffer[idx + 1];
+                frame[idx + 2] = world_buffer[idx + 2];
+            } else {
+                // Bottom-right: Particle fountain
+                frame[idx] = particle_buffer[idx];
+                frame[idx + 1] = particle_buffer[idx + 1];
+                frame[idx + 2] = particle_buffer[idx + 2];
+            }
+        }
+    }
+    
+    // Add a label for each quadrant
+    draw_text_ab_glyph(frame, "Ray Pattern", 10.0, 20.0, [255, 255, 0, 255], WIDTH);
+    draw_text_ab_glyph(frame, "Mesmerise Circular", half_width as f32 + 10.0, 20.0, [0, 255, 255, 255], WIDTH);
+    draw_text_ab_glyph(frame, "World Lines", 10.0, half_height as f32 + 20.0, [255, 0, 255, 255], WIDTH);
+    draw_text_ab_glyph(frame, "Particle Fountain", half_width as f32 + 10.0, half_height as f32 + 20.0, [0, 255, 0, 255], WIDTH);
+    
+    // Draw help text at the bottom
+    draw_text_ab_glyph(
+        frame,
+        "Press H for keyboard controls",
+        WIDTH as f32 / 2.0 - 100.0,
+        HEIGHT as f32 - 30.0,
+        [255, 255, 255, 255],
+        WIDTH
+    );
 }

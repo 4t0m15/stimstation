@@ -1,4 +1,4 @@
-use crate::types::{SimpleLine, SimpleParticle, SimpleWorld, SimplePos, SimpleColor, simple_hsv_to_rgb, VisualMode, MAX_LINES, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, Buffers};
+use crate::types::{SimpleLine, SimpleParticle, SimpleWorld, SimplePos, simple_hsv_to_rgb, VisualMode, MAX_LINES, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, Buffers};
 use crate::pixel_utils::*;
 use crate::{mesmerise_circular, ray_pattern, particle_fountain};
 use pixels::Pixels;
@@ -8,7 +8,7 @@ use std::time::Instant;
 
 // Simple Line implementation for main.rs compatibility
 impl SimpleLine {
-    pub fn new(rng: &mut ThreadRng) -> Self {
+    pub fn app_new(rng: &mut ThreadRng) -> Self {
         let x = rng.gen_range(0.0..WIDTH as f32);
         let y = rng.gen_range(0.0..HEIGHT as f32);
         let speed = rng.gen_range(0.5..2.5);
@@ -35,7 +35,7 @@ impl SimpleLine {
         }
     }
     
-    pub fn update(&mut self, rng: &mut ThreadRng, time: f32, mouse_pos: Option<SimplePos>) {
+    pub fn app_update(&mut self, rng: &mut ThreadRng, time: f32, mouse_pos: Option<SimplePos>) {
         // Color cycling based on time
         let hue = (time * self.cycle_speed + self.cycle_offset) % 1.0;
         self.color = simple_hsv_to_rgb(hue, 0.8, 0.9);
@@ -110,7 +110,7 @@ impl SimpleLine {
 
 // Simple Particle implementation for main.rs compatibility
 impl SimpleParticle {
-    pub fn new(x: f32, y: f32, rng: &mut impl Rng) -> Self {
+    pub fn app_new(x: f32, y: f32, rng: &mut impl Rng) -> Self {
         let speed = rng.gen_range(1.0..5.0);
         let angle = rng.gen_range(0.0..std::f32::consts::TAU);
         
@@ -123,7 +123,7 @@ impl SimpleParticle {
         }
     }
     
-    pub fn update(&mut self, dt: f32) -> bool {
+    pub fn app_update(&mut self, dt: f32) -> bool {
         // Update position
         self.pos.0 += self.vel.0;
         self.pos.1 += self.vel.1;
@@ -141,10 +141,10 @@ impl SimpleParticle {
 
 // Simple World implementation for main.rs compatibility
 impl SimpleWorld {
-    pub fn new() -> Self {
+    pub fn app_new() -> Self {
         let mut rng = thread_rng();
         Self {
-            lines: (0..MAX_LINES).map(|_| SimpleLine::new(&mut rng)).collect(),
+            lines: (0..MAX_LINES).map(|_| SimpleLine::app_new(&mut rng)).collect(),
             rng,
             start_time: Instant::now(),
             mouse_pos: None,
@@ -156,18 +156,18 @@ impl SimpleWorld {
         }
     }
     
-    pub fn create_explosion(&mut self, x: f32, y: f32, count: usize) {
+    pub fn app_create_explosion(&mut self, x: f32, y: f32, count: usize) {
         for _ in 0..count {
-            self.particles.push(SimpleParticle::new(x, y, &mut self.rng));
+            self.particles.push(SimpleParticle::app_new(x, y, &mut self.rng));
         }
     }
 
-    pub fn update(&mut self) {
+    pub fn app_update(&mut self) {
         let elapsed = self.start_time.elapsed().as_secs_f32();
         
         // Update particles
         let dt = 1.0 / 60.0; // Assume 60 FPS for physics
-        self.particles.retain_mut(|p| p.update(dt));
+        self.particles.retain_mut(|p| p.app_update(dt));
         
         // Slowly cycle background color
         let bg_hue = (elapsed * 0.02) % 1.0;
@@ -178,7 +178,7 @@ impl SimpleWorld {
             VisualMode::Normal => {
                 // Normal update with mouse interaction
                 for line in &mut self.lines {
-                    line.update(&mut self.rng, elapsed, self.mouse_pos);
+                    line.app_update(&mut self.rng, elapsed, self.mouse_pos);
                 }
             },
             VisualMode::Vortex => {
@@ -187,7 +187,7 @@ impl SimpleWorld {
                 
                 for line in &mut self.lines {
                     // First update normally
-                    line.update(&mut self.rng, elapsed, None);
+                    line.app_update(&mut self.rng, elapsed, None);
                     
                     // Then add vortex effect
                     for i in 0..2 {
@@ -214,7 +214,7 @@ impl SimpleWorld {
                 
                 for line in &mut self.lines {
                     // Normal update first
-                    line.update(&mut self.rng, elapsed, None);
+                    line.app_update(&mut self.rng, elapsed, None);
                     
                     // Add wave effect - vary speed based on position
                     for i in 0..2 {
@@ -233,7 +233,7 @@ impl SimpleWorld {
                 
                 for (i, line) in self.lines.iter_mut().enumerate() {
                     // Normal update first
-                    line.update(&mut self.rng, elapsed, None);
+                    line.app_update(&mut self.rng, elapsed, None);
                     
                     // Set rainbow color pattern with offset based on line index
                     let line_offset = (i as f32 / line_count) * 0.5;
@@ -257,7 +257,7 @@ impl SimpleWorld {
         if self.mouse_active && self.rng.gen_bool(0.1) {
             if let Some((x, y)) = self.mouse_pos {
                 if self.lines.len() < MAX_LINES * 2 {
-                    let mut new_line = SimpleLine::new(&mut self.rng);
+                    let mut new_line = SimpleLine::app_new(&mut self.rng);
                     new_line.pos[0] = (x, y);
                     new_line.pos[1] = (
                         x + self.rng.gen_range(-new_line.length/2.0..new_line.length/2.0),
@@ -276,14 +276,14 @@ impl SimpleWorld {
         // Maintain line count target (slowly adjust)
         if !self.mouse_active {
             if self.lines.len() < self.target_line_count && self.rng.gen_bool(0.1) {
-                self.lines.push(SimpleLine::new(&mut self.rng));
+                self.lines.push(SimpleLine::app_new(&mut self.rng));
             } else if self.lines.len() > self.target_line_count && self.rng.gen_bool(0.1) {
                 self.lines.remove(0);
             }
         }
     }
     
-    pub fn draw(&self, frame: &mut [u8]) {
+    pub fn app_draw(&self, frame: &mut [u8]) {
         // Check if we need trails effect (for Rainbow mode)
         let use_trails = self.mode == VisualMode::Rainbow;
         
@@ -333,15 +333,15 @@ impl SimpleWorld {
         }
     }
     
-    pub fn set_mouse_pos(&mut self, x: f32, y: f32) {
+    pub fn app_set_mouse_pos(&mut self, x: f32, y: f32) {
         self.mouse_pos = Some((x, y));
     }
     
-    pub fn set_mouse_active(&mut self, active: bool) {
+    pub fn app_set_mouse_active(&mut self, active: bool) {
         self.mouse_active = active;
     }
     
-    pub fn toggle_mode(&mut self) {
+    pub fn app_toggle_mode(&mut self) {
         self.mode = match self.mode {
             VisualMode::Normal => VisualMode::Vortex,
             VisualMode::Vortex => VisualMode::Waves,
@@ -350,16 +350,16 @@ impl SimpleWorld {
         };
     }
     
-    pub fn add_lines(&mut self, count: usize) {
+    pub fn app_add_lines(&mut self, count: usize) {
         self.target_line_count = (self.target_line_count + count).min(MAX_LINES * 3);
         
         // Immediately add some lines to reach target
         while self.lines.len() < self.target_line_count && self.lines.len() < MAX_LINES * 3 {
-            self.lines.push(SimpleLine::new(&mut self.rng));
+            self.lines.push(SimpleLine::app_new(&mut self.rng));
         }
     }
     
-    pub fn remove_lines(&mut self, count: usize) {
+    pub fn app_remove_lines(&mut self, count: usize) {
         self.target_line_count = self.target_line_count.saturating_sub(count).max(10);
         
         // Remove lines if we have too many
@@ -369,7 +369,7 @@ impl SimpleWorld {
     }
     
     // Get current info for the window title
-    pub fn get_status(&self) -> String {
+    pub fn app_get_status(&self) -> String {
         format!("Mesmerise - Mode: {:?} - Lines: {} - Space: change mode, +/-: lines, E: explosion, 1-4: views, Mouse: interact",
             self.mode, self.lines.len())
     }
@@ -597,4 +597,95 @@ pub fn draw_ray_pattern(pixels: &mut Pixels, time: f32) {
     // Draw the ray pattern directly to the frame buffer using the full width and height
     // Use the actual WIDTH and HEIGHT for ray pattern to fill the entire buffer
     ray_pattern::draw_frame(frame, WIDTH, HEIGHT, time, 0, WIDTH);
+}
+
+// Draw all visualizations combined into one screen
+pub fn draw_all_visualizations(pixels: &mut Pixels, world: &SimpleWorld, time: f32) {
+    let frame = pixels.frame_mut();
+    
+    // Clear with a deep blue/black gradient background
+    for y in 0..HEIGHT as usize {
+        let gradient_factor = y as f32 / HEIGHT as f32;
+        let bg_blue = (20.0 * gradient_factor) as u8;
+        for x in 0..WIDTH as usize {
+            let idx = 4 * (y * WIDTH as usize + x);
+            frame[idx] = 0;       // R
+            frame[idx + 1] = 0;   // G
+            frame[idx + 2] = bg_blue; // B
+            frame[idx + 3] = 255; // A
+        }
+    }
+    
+    // Draw ray pattern with reduced opacity as background effect
+    let ray_frame = &mut frame.to_vec();
+    ray_pattern::draw_frame(ray_frame, WIDTH, HEIGHT, time, 0, WIDTH);
+    
+    // Blend ray pattern with reduced opacity
+    for (dst, src) in frame.chunks_exact_mut(4).zip(ray_frame.chunks_exact(4)) {
+        dst[0] = (dst[0] as u16 * 8 + src[0] as u16 * 2) as u8 / 10; // R
+        dst[1] = (dst[1] as u16 * 8 + src[1] as u16 * 2) as u8 / 10; // G
+        dst[2] = (dst[2] as u16 * 8 + src[2] as u16 * 2) as u8 / 10; // B
+    }
+    
+    // Draw moving particles throughout the entire screen
+    particle_fountain::draw_frame(frame, WIDTH, HEIGHT, time);
+    
+    // Draw world lines with full opacity in center area
+    let world_buffer = &mut vec![0u8; 4 * WIDTH as usize * HEIGHT as usize];
+    world.draw(world_buffer);
+    
+    // Calculate circle parameters for blending the world
+    let center_x = WIDTH as f32 / 2.0;
+    let center_y = HEIGHT as f32 / 2.0;
+    let max_radius = (WIDTH.min(HEIGHT) / 2) as f32 * 0.8;
+    
+    // Blend world buffer with main frame using circular mask
+    for y in 0..HEIGHT as usize {
+        for x in 0..WIDTH as usize {
+            let idx = 4 * (y * WIDTH as usize + x);
+            
+            // Calculate distance from center
+            let dx = x as f32 - center_x;
+            let dy = y as f32 - center_y;
+            let dist = (dx*dx + dy*dy).sqrt();
+            
+            // Create circular gradient for blending
+            if dist < max_radius {
+                let blend_factor = 1.0 - (dist / max_radius).powi(3);
+                
+                frame[idx] = (frame[idx] as f32 * (1.0 - blend_factor) + 
+                             world_buffer[idx] as f32 * blend_factor) as u8;
+                frame[idx + 1] = (frame[idx + 1] as f32 * (1.0 - blend_factor) + 
+                                 world_buffer[idx + 1] as f32 * blend_factor) as u8;
+                frame[idx + 2] = (frame[idx + 2] as f32 * (1.0 - blend_factor) + 
+                                 world_buffer[idx + 2] as f32 * blend_factor) as u8;
+            }
+        }
+    }
+    
+    // Draw mesmerise circular effect in top-right corner with 40% opacity
+    let circular_buffer = &mut vec![0u8; 4 * mesmerise_circular::WIDTH as usize * mesmerise_circular::HEIGHT as usize];
+    mesmerise_circular::draw_frame(circular_buffer, time);
+    
+    // Blend circular effect into top-right area at 40% opacity
+    let corner_x = WIDTH as usize - mesmerise_circular::WIDTH as usize;
+    let corner_y = 0;
+    let circular_width = mesmerise_circular::WIDTH as usize;
+    let circular_height = mesmerise_circular::HEIGHT as usize;
+    
+    for y in 0..circular_height {
+        for x in 0..circular_width {
+            if y + corner_y < HEIGHT as usize && x + corner_x < WIDTH as usize {
+                let src_idx = 4 * (y * circular_width + x);
+                let dst_idx = 4 * ((y + corner_y) * WIDTH as usize + (x + corner_x));
+                
+                // Only blend non-black pixels with 40% opacity
+                if circular_buffer[src_idx] > 0 || circular_buffer[src_idx + 1] > 0 || circular_buffer[src_idx + 2] > 0 {
+                    frame[dst_idx] = (frame[dst_idx] as f32 * 0.6 + circular_buffer[src_idx] as f32 * 0.4) as u8;
+                    frame[dst_idx + 1] = (frame[dst_idx + 1] as f32 * 0.6 + circular_buffer[src_idx + 1] as f32 * 0.4) as u8;
+                    frame[dst_idx + 2] = (frame[dst_idx + 2] as f32 * 0.6 + circular_buffer[src_idx + 2] as f32 * 0.4) as u8;
+                }
+            }
+        }
+    }
 }

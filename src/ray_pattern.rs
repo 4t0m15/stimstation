@@ -3,9 +3,13 @@ use ab_glyph::{Font as _, FontArc, Glyph, PxScale};
 use font_kit::{source::SystemSource, properties::Properties};
 use once_cell::sync::Lazy;
 use rand::prelude::*;
+use std::sync::Once;
 use winit::monitor::MonitorHandle;
 use crate::audio_handler::AudioVisualizer;
 use crate::audio_playback::{start_audio_thread, is_audio_thread_started};
+
+// Initialize once for thread safety
+static INIT: Once = Once::new();
 
 const RAY_COUNT: usize = 60;  // Number of rays for each source
 
@@ -691,7 +695,7 @@ pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset
         
         // Update and draw the audio visualizer
         if let Some(audio_viz) = AUDIO_VISUALIZER.as_mut() {
-            let monitor_height = unsafe { MONITOR_HEIGHT };
+            let monitor_height = MONITOR_HEIGHT;
             audio_viz.update(time, monitor_height);
             audio_viz.draw(frame, width, height, x_offset, buffer_width);
         }
@@ -980,7 +984,7 @@ fn add_random_text_fragment(width: u32, height: u32, _time: f32) {
                     return;
                 }
 
-                let segment_length = rng.gen_range(20..80);
+                let _segment_length = rng.gen_range(20..80);
                 let text = format!("Text fragment {}", rng.gen_range(1..1000));
 
                 let x = rng.gen_range(0..width as i32);

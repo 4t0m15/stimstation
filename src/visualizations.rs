@@ -1,6 +1,5 @@
 use crate::types::{Color, Position, hsv_to_rgb};
 use crate::rendering::{FrameBuffer, draw_triangle_filled, draw_text_fast, draw_circle_fast};
-use glam::Vec2;
 
 // Pythagoras theorem visualization
 pub fn draw_pythagoras(frame: &mut FrameBuffer, elapsed: f32) {

@@ -2,7 +2,7 @@
 use rand::prelude::*;
 use winit::monitor::MonitorHandle;
 use crate::audio_integration::AudioIntegration;
-// use crate::text_renderer::TextRenderer;
+use crate::text_processor::TextProcessor;
 
 // Number of rays for each source
 const RAY_COUNT: usize = 60;
@@ -284,7 +284,7 @@ static mut RIGHT_SORTER: Option<SortVisualizer> = None;
 
 // Static instances for new modules
 static mut AUDIO_INTEGRATION: Option<AudioIntegration> = None;
-static mut TEXT_RENDERER: Option<TextRenderer> = None;
+static mut TEXT_RENDERER: Option<TextProcessor> = None;
 static mut MONITOR_WIDTH: Option<u32> = None;
 static mut MONITOR_HEIGHT: Option<u32> = None;
 

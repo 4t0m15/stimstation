@@ -32,6 +32,7 @@ fn draw_menu_text(
     frame_width: u32
 ) {
     use crate::text_rendering::draw_text_ab_glyph;
+    // Pass the entire text string to be rendered as a single unit
     draw_text_ab_glyph(
         frame, 
         text, 
@@ -188,10 +189,13 @@ impl Menu {
         
         // Draw menu title with larger, more visible text
         let title = "STIMSTATION VISUALIZATIONS";
+        // Use the text_rendering module's width estimation function
+        use crate::text_rendering::estimate_text_width;
+        let title_width = estimate_text_width(title) as i32;
         draw_menu_text(
             frame, 
             title, 
-            width as i32 / 2 - (title.len() as i32 * 6), 
+            width as i32 / 2 - title_width / 2, // Center the text properly
             height as i32 / 6, 
             Color::new(255, 255, 255),
             width
@@ -209,7 +213,8 @@ impl Menu {
             
             // Draw selection rectangle for active item - make it more visible
             if i == self.active_index {
-                let rect_width = option.name.len() as i32 * 12 + 40;
+                let option_width = estimate_text_width(&option.name) as i32;
+                let rect_width = option_width + 40; // Add padding
                 let rect_height = 30;
                 let rect_x = width as i32 / 2 - rect_width / 2;
                 let rect_y = y_pos - 5;
@@ -225,10 +230,11 @@ impl Menu {
             }
             
             // Draw option name
+            let option_width = estimate_text_width(&option.name) as i32;
             draw_menu_text(
                 frame,
                 &option.name,
-                width as i32 / 2 - (option.name.len() as i32 * 6),
+                width as i32 / 2 - option_width / 2,
                 y_pos,
                 text_color,
                 width
@@ -236,10 +242,11 @@ impl Menu {
             
             // Draw description for selected option
             if i == self.active_index {
+                let desc_width = estimate_text_width(&option.description) as i32;
                 draw_menu_text(
                     frame,
                     &option.description,
-                    width as i32 / 2 - (option.description.len() as i32 * 3),
+                    width as i32 / 2 - desc_width / 2,
                     y_pos + 20,
                     Color::new(200, 200, 200),
                     width
@@ -249,10 +256,11 @@ impl Menu {
         
         // Draw instructions
         let instructions = "USE ARROW KEYS TO NAVIGATE AND ENTER TO SELECT";
+        let instructions_width = estimate_text_width(instructions) as i32;
         draw_menu_text(
             frame,
             instructions,
-            width as i32 / 2 - (instructions.len() as i32 * 3),
+            width as i32 / 2 - instructions_width / 2,
             height as i32 * 4/5,
             Color::new(180, 180, 180),
             width

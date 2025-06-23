@@ -21,6 +21,8 @@ pub mod pythagoras;
 pub mod ray_pattern;
 mod rendering;
 mod simple_proof;
+pub mod text_processor;
+pub mod text_renderer;
 mod text_rendering;
 mod types;
 mod visualizations;

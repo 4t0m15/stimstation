@@ -1,13 +1,13 @@
 // Audio playback and noise generation
 use rodio::{OutputStream, Sink, Source};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::thread;
 use std::time::Duration;
 use rand::prelude::*;
 use crate::audio_handler::{analyze_audio, set_audio_spectrum, AUDIO_VIZ_BARS};
 
 // Audio thread management
-static mut AUDIO_THREAD_STARTED: bool = false;
+static AUDIO_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
 
 // White noise generator for rodio
 pub struct NoiseSource {
@@ -63,12 +63,10 @@ impl Source for NoiseSource {
 // Start audio playback and analysis thread
 pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
     // Check if already started
-    unsafe {
-        if AUDIO_THREAD_STARTED {
-            return None;
-        }
-        AUDIO_THREAD_STARTED = true;
+    if AUDIO_THREAD_STARTED.load(Ordering::SeqCst) {
+        return None;
     }
+    AUDIO_THREAD_STARTED.store(true, Ordering::SeqCst);
     
     // Initialize the audio spectrum data
     let audio_spectrum = Arc::new(Mutex::new(vec![0.0; AUDIO_VIZ_BARS]));
@@ -130,9 +128,7 @@ pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
         }
         
         // Mark as not started when thread exits
-        unsafe {
-            AUDIO_THREAD_STARTED = false;
-        }
+        AUDIO_THREAD_STARTED.store(false, Ordering::SeqCst);
     });
     
     Some(handle)
@@ -140,14 +136,12 @@ pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
 
 // Check if audio thread is running
 pub fn is_audio_thread_started() -> bool {
-    unsafe { AUDIO_THREAD_STARTED }
+    AUDIO_THREAD_STARTED.load(Ordering::SeqCst)
 }
 
 // Stop the audio thread (for cleanup)
 pub fn stop_audio_thread() {
-    unsafe {
-        AUDIO_THREAD_STARTED = false;
-    }
+    AUDIO_THREAD_STARTED.store(false, Ordering::SeqCst);
 }
 
 // Create a simple tone generator (alternative to noise)

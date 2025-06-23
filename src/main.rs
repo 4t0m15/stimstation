@@ -8,28 +8,13 @@ use winit::{
 };
 use winit_input_helper::WinitInputHelper;
 
-mod app;
-mod audio_handler;
-mod audio_integration;
-mod audio_playback;
-pub mod fibonacci_spiral;
-mod menu;
-mod mesmerise_circular;
-mod particle_fountain;
-mod pixel_utils;
-pub mod pythagoras;
-pub mod ray_pattern;
-mod rendering;
-mod simple_proof;
-pub mod text_processor;
-pub mod text_renderer;
-mod text_rendering;
-mod types;
-mod visualizations;
-mod world;
+// Import from the library crate
+use stimstation::{
+    types::{HEIGHT, WIDTH},
+};
 
+mod app;
 use crate::app::App;
-use crate::types::{HEIGHT, WIDTH};
 
 fn main() -> Result<(), Error> {
     let event_loop = EventLoop::new().unwrap();

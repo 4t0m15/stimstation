@@ -1,6 +1,6 @@
 use crate::types::{World, Line, Particle, Position, Color, VisualMode, hsv_to_rgb, WIDTH, HEIGHT, MAX_LINES};
 use crate::types::{SimpleWorld, SimpleLine, SimpleParticle, SimplePos, SimpleColor, FpsCounter, Buffers};
-use crate::mesmerise_circular;
+use crate::viz::circular;
 use rand::prelude::*;
 use rayon::prelude::*;
 use std::time::{Instant, Duration};
@@ -431,7 +431,8 @@ impl SimpleLine {
         }
         
         // Occasionally change velocity with small random adjustments
-        if rng.gen::<f64>() < 0.02 {
+        let random_val = rand::random::<f64>();
+        if random_val < 0.02 {
             for i in 0..2 {
                 self.vel[i].0 = (self.vel[i].0 + rng.gen_range(-0.15..0.15)).clamp(-3.0, 3.0);
                 self.vel[i].1 = (self.vel[i].1 + rng.gen_range(-0.15..0.15)).clamp(-3.0, 3.0);
@@ -584,7 +585,8 @@ impl SimpleWorld {
         }
         
         // Spawn new lines when mouse button is held
-        if self.mouse_active && self.rng.gen::<f64>() < 0.1 {
+        let mouse_spawn = rand::random::<f64>();
+        if self.mouse_active && mouse_spawn < 0.1 {
             if let Some((x, y)) = self.mouse_pos {
                 if self.lines.len() < SIMPLE_MAX_LINES * 2 {
                     let mut new_line = SimpleLine::new(&mut self.rng);
@@ -605,9 +607,11 @@ impl SimpleWorld {
         
         // Maintain line count target (slowly adjust)
         if !self.mouse_active {
-            if self.lines.len() < self.target_line_count && self.rng.gen::<f64>() < 0.1 {
+            let add_chance = rand::random::<f64>();
+            let remove_chance = rand::random::<f64>();
+            if self.lines.len() < self.target_line_count && add_chance < 0.1 {
                 self.lines.push(SimpleLine::new(&mut self.rng));
-            } else if self.lines.len() > self.target_line_count && self.rng.gen::<f64>() < 0.1 {
+            } else if self.lines.len() > self.target_line_count && remove_chance < 0.1 {
                 self.lines.remove(0);
             }
         }
@@ -694,7 +698,7 @@ impl FpsCounter {
 impl Buffers {
     pub fn new() -> Self {
         let original = vec![0u8; 4 * SIMPLE_ORIGINAL_WIDTH as usize * SIMPLE_ORIGINAL_HEIGHT as usize];
-        let circular = vec![0u8; 4 * mesmerise_circular::WIDTH as usize * mesmerise_circular::HEIGHT as usize];
+        let circular = vec![0u8; 4 * circular::WIDTH as usize * circular::HEIGHT as usize];
         let full = vec![0u8; 4 * SIMPLE_WIDTH as usize * SIMPLE_HEIGHT as usize];
         Self { original, circular, full }
     }

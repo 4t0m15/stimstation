@@ -3,6 +3,14 @@ name = "mesmerise"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "stimstation"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mesmerise"
+path = "src/main.rs"
+
 [dependencies]
 pixels = "0.15.0"
 winit = "0.29.15"

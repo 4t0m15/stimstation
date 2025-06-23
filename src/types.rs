@@ -11,7 +11,6 @@ pub type Color = Srgb<u8>;
 pub type Position = Vec2;
 pub type Velocity = Vec2;
 
-
 // Constants
 pub const WIDTH: u32 = 1600;
 pub const HEIGHT: u32 = 800;

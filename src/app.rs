@@ -1,15 +1,19 @@
-use crate::types::{ActiveSide, FpsCounter, Buffers, World, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT};
-use crate::menu::Menu;
-use crate::visualizations;
-use crate::text_rendering;
+use stimstation::types::{ActiveSide, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT};
+use stimstation::{FpsCounter, Buffers, World};
+use stimstation::{menu::Menu, visualizations, text_rendering};
+
 use winit::{
-    event::{MouseButton},
+    event::MouseButton,
     keyboard::KeyCode,
-    window::Window,
+    window::{Window, Fullscreen},
 };
 use winit_input_helper::WinitInputHelper;
+
+use glam::{vec2, Vec2};
+
 use std::time::Instant;
 
+/// High‑level application wrapper around all StimStation visualisations
 pub struct App {
     world: World,
     menu: Menu,
@@ -23,16 +27,18 @@ pub struct App {
 }
 
 impl App {
+    /// Creates a fresh `App` instance and initialises the ray‑pattern helper
     pub fn new(window: &Window) -> Self {
         let world = World::new();
+
         if let Some(monitor) = window.primary_monitor() {
-            crate::ray_pattern::set_monitor_dimensions(&monitor);
+            stimstation::viz::ray_pattern::set_monitor_dimensions(&monitor);
         }
 
         Self {
             world,
             menu: Menu::new(),
-            active_side: ActiveSide::Circular,  // Start with circular which is simpler
+            active_side: ActiveSide::Circular, // default = simplest
             start_time: Instant::now(),
             fps_counter: FpsCounter::new(),
             is_fullscreen: false,
@@ -42,9 +48,14 @@ impl App {
         }
     }
 
+    /// Dispatches window / keyboard / mouse input events
     pub fn handle_input(&mut self, input: &mut WinitInputHelper, window: &Window) {
+        let elapsed = self.start_time.elapsed().as_secs_f32();
+        // ── 1. Handle menu interaction first ───────────────────────────────
         if self.menu.is_visible() {
-            self.menu.handle_input(input, self.start_time.elapsed().as_secs_f32());
+            self.menu
+                .handle_input(input, self.start_time.elapsed().as_secs_f32());
+
             if self.menu.has_made_selection() {
                 self.active_side = self.menu.get_selected_visualization();
                 self.menu.reset_selection();
@@ -53,176 +64,155 @@ impl App {
             return;
         }
 
+        // ── 2. Global hot‑keys ─────────────────────────────────────────────
         if input.key_pressed(KeyCode::Escape) {
-            self.menu.toggle_visibility(self.start_time.elapsed().as_secs_f32());
+            self.menu
+                .toggle_visibility(self.start_time.elapsed().as_secs_f32());
         }
-
         if input.key_pressed(KeyCode::Space) {
             self.world.toggle_mode();
             self.update_window_title(window);
         }
-
         if input.key_pressed(KeyCode::KeyH) {
             self.show_help = !self.show_help;
             self.update_window_title(window);
         }
-
         if input.key_pressed(KeyCode::KeyF) || input.key_pressed(KeyCode::F11) {
             self.is_fullscreen = !self.is_fullscreen;
             window.set_fullscreen(if self.is_fullscreen {
-                Some(winit::window::Fullscreen::Borderless(None))
+                Some(Fullscreen::Borderless(None))
             } else {
                 None
             });
+
             if let Some(monitor) = window.primary_monitor() {
-                crate::ray_pattern::set_monitor_dimensions(&monitor);
+                stimstation::viz::ray_pattern::set_monitor_dimensions(&monitor);
             }
         }
 
+        // ── 3. Mouse handling ──────────────────────────────────────────────
         if let Some(mouse_pos) = input.cursor() {
-            let window_size = window.inner_size();
-            if mouse_pos.0 < window_size.width as f32 / 2.0 {
-                let adjusted_x = mouse_pos.0;
-                let scale_x = ORIGINAL_WIDTH as f32 / (window_size.width as f32 / 2.0);
-                let scale_y = ORIGINAL_HEIGHT as f32 / window_size.height as f32;
-                self.world.set_mouse_pos(glam::vec2(adjusted_x * scale_x, mouse_pos.1 * scale_y));
+            let win = window.inner_size();
+            if mouse_pos.0 < win.width as f32 / 2.0 {
+                // Only interact inside the original‑visualisation quadrant
+                let scale_x = ORIGINAL_WIDTH as f32 / (win.width as f32 / 2.0);
+                let scale_y = ORIGINAL_HEIGHT as f32 / win.height as f32;
+                self.world.set_mouse_pos(vec2(mouse_pos.0 * scale_x, mouse_pos.1 * scale_y), elapsed);
             } else {
                 self.world.mouse_pos = None;
             }
         }
 
-        if let Some(_) = input.cursor() {
-            let window_size = window.inner_size();
-            if input.cursor().unwrap().0 < window_size.width as f32 / 2.0 {
-                self.world.set_mouse_active(input.mouse_held(MouseButton::Left));
-            } else {
-                self.world.set_mouse_active(false);
-            }
+        if let Some(cursor) = input.cursor() {
+            let win = window.inner_size();
+            let over_left = cursor.0 < win.width as f32 / 2.0;
+            self.world
+                .set_mouse_active(over_left && input.mouse_held(MouseButton::Left));
         }
 
+        // ── 4. World‑level interactions ───────────────────────────────────
         if input.key_pressed(KeyCode::KeyE) {
-            let center_x = ORIGINAL_WIDTH as f32 / 2.0;
-            let center_y = HEIGHT as f32 / 2.0;
-            self.world.create_explosion(glam::vec2(center_x, center_y), 200);
+            let centre = vec2(ORIGINAL_WIDTH as f32 / 2.0, HEIGHT as f32 / 2.0);
+            self.world.create_explosion(centre, 200);
         }
-
         if input.mouse_pressed(MouseButton::Right) {
             if let Some(pos) = self.world.mouse_pos {
                 self.world.create_explosion(pos, 100);
             }
         }
-
         if input.key_pressed(KeyCode::Equal) {
             self.world.add_lines(10);
             self.update_window_title(window);
         }
-
         if input.key_pressed(KeyCode::Minus) {
             self.world.remove_lines(10);
             self.update_window_title(window);
         }
 
-        let new_active_side = match () {
-            _ if input.key_pressed(KeyCode::Digit1) => Some(ActiveSide::Original),
-            _ if input.key_pressed(KeyCode::Digit2) => Some(ActiveSide::Circular),
-            _ if input.key_pressed(KeyCode::Digit3) => Some(ActiveSide::Full),
-            _ if input.key_pressed(KeyCode::Digit4) => Some(ActiveSide::RayPattern),
-            _ if input.key_pressed(KeyCode::Digit5) => Some(ActiveSide::Pythagoras),
-            _ if input.key_pressed(KeyCode::Digit6) => Some(ActiveSide::FibonacciSpiral),
-            _ if input.key_pressed(KeyCode::Digit7) => Some(ActiveSide::SimpleProof),
-            _ if input.key_pressed(KeyCode::Digit8) => Some(ActiveSide::Combined),
-            _ => None,
+        // ── 5. Quick numeric shortcuts to switch visualisations ────────────
+        let new_active_side = if input.key_pressed(KeyCode::Digit1) {
+            Some(ActiveSide::Original)
+        } else if input.key_pressed(KeyCode::Digit2) {
+            Some(ActiveSide::Circular)
+        } else if input.key_pressed(KeyCode::Digit3) {
+            Some(ActiveSide::Full)
+        } else if input.key_pressed(KeyCode::Digit4) {
+            Some(ActiveSide::RayPattern)
+        } else if input.key_pressed(KeyCode::Digit5) {
+            Some(ActiveSide::Pythagoras)
+        } else if input.key_pressed(KeyCode::Digit6) {
+            Some(ActiveSide::FibonacciSpiral)
+        } else if input.key_pressed(KeyCode::Digit7) {
+            Some(ActiveSide::SimpleProof)
+        } else if input.key_pressed(KeyCode::Digit8) {
+            Some(ActiveSide::Combined)
+        } else {
+            None
         };
 
-        if let Some(new_side) = new_active_side {
-            self.active_side = new_side;
+        if let Some(side) = new_active_side {
+            self.active_side = side;
             self.update_window_title(window);
         }
     }
 
+    /// Advances simulation state once per frame
     pub fn update(&mut self) {
-        self.world.update();
+        let elapsed = self.start_time.elapsed().as_secs_f32();
+        self.world.update(elapsed);
         self.menu.update(self.start_time.elapsed().as_secs_f32());
         self.fps_counter.update();
     }
 
+    /// Renders the frame into the RGBA pixel buffer returned by `pixels()`
     pub fn draw(&mut self, frame: &mut [u8]) {
-        // Always clear the frame first
-        frame.fill(0);
+        frame.fill(0); // clear to black
 
         let elapsed = self.start_time.elapsed().as_secs_f32();
 
-        // If menu is visible, only render the menu and skip visualizations
+        // Menu supersedes all viz output
         if self.menu.is_visible() {
             self.menu.render(frame, WIDTH, HEIGHT);
             return;
         }
 
-        // Draw a simple test pattern if visualizations fail
-        let draw_test_pattern = false;
+        self.buffers.clear();
 
         match self.active_side {
-            ActiveSide::Original => {
-                self.buffers.clear();
-                visualizations::draw_original_with_buffer(frame, &self.world, &mut self.buffers.original);
-            },
-            ActiveSide::Circular => {
-                self.buffers.clear();
-                visualizations::draw_circular_with_buffer(frame, elapsed, &mut self.buffers.circular);
-            },
-            ActiveSide::Full => {
-                self.buffers.clear();
-                visualizations::draw_full_screen_with_buffer(frame, &self.world, elapsed, &mut self.buffers);
-            },
-            ActiveSide::RayPattern => crate::ray_pattern::draw_frame(frame, WIDTH, HEIGHT, elapsed, 0, WIDTH),
+            ActiveSide::Original => visualizations::draw_original_with_buffer(frame, &self.world, &mut self.buffers.original),
+            ActiveSide::Circular => visualizations::draw_circular_with_buffer(frame, elapsed, &mut self.buffers.circular),
+            ActiveSide::Full => visualizations::draw_full_screen_with_buffer(frame, &self.world, elapsed, &mut self.buffers),
+            ActiveSide::RayPattern => stimstation::viz::ray_pattern::draw_frame(frame, WIDTH, HEIGHT, elapsed, 0, WIDTH),
             ActiveSide::Pythagoras => visualizations::draw_pythagoras_frame(frame, elapsed),
             ActiveSide::FibonacciSpiral => visualizations::draw_fibonacci_frame(frame, elapsed),
             ActiveSide::SimpleProof => visualizations::draw_simple_proof_frame(frame, elapsed),
             ActiveSide::Combined => visualizations::draw_all_visualizations(frame, &self.world, elapsed),
         }
 
-        // Draw FPS counter
+        // HUD / overlay text ------------------------------------------------
         let fps_text = format!("FPS: {:.1}", self.fps_counter.fps());
         text_rendering::draw_text_ab_glyph(frame, &fps_text, 10.0, (HEIGHT - 30) as f32, [255, 255, 0, 255], WIDTH);
 
-        // Draw help if requested
         if self.show_help {
             text_rendering::draw_keyboard_guide(frame, WIDTH);
         }
 
-        // Always draw menu if visible - this should ensure something is always drawn
-        if self.menu.is_visible() {
-            self.menu.render(frame, WIDTH, HEIGHT);
-        }
-
-        // If frame is still all black, draw a test pattern
-        let mut is_all_black = true;
-        for i in (0..frame.len()).step_by(4) {
-            if frame[i] != 0 || frame[i + 1] != 0 || frame[i + 2] != 0 {
-                is_all_black = false;
-                break;
-            }
-        }
-
-        if is_all_black || draw_test_pattern {
-            // Draw a simple test pattern
+        // Safety‑net: if we somehow drew nothing, show a colourful pattern
+        if frame.iter().step_by(4).all(|&b| b == 0) {
             for y in 0..HEIGHT {
                 for x in 0..WIDTH {
                     let idx = 4 * (y * WIDTH + x) as usize;
-                    if idx + 3 < frame.len() {
-                        frame[idx] = ((x + y) % 255) as u8;     // Red
-                        frame[idx + 1] = ((x * 2) % 255) as u8; // Green  
-                        frame[idx + 2] = ((y * 2) % 255) as u8; // Blue
-                        frame[idx + 3] = 255;                   // Alpha
-                    }
+                    frame[idx] = ((x + y) % 255) as u8;
+                    frame[idx + 1] = ((x * 2) % 255) as u8;
+                    frame[idx + 2] = ((y * 2) % 255) as u8;
+                    frame[idx + 3] = 255;
                 }
             }
-            
-            // Draw text on top
             text_rendering::draw_text_ab_glyph(frame, "StimStation - Test Pattern", 50.0, 50.0, [255, 255, 255, 255], WIDTH);
         }
     }
 
+    // ── Control‑flow helpers ───────────────────────────────────────────────
     pub fn should_quit(&self) -> bool {
         self.should_quit
     }
@@ -233,15 +223,16 @@ impl App {
 
     fn update_window_title(&self, window: &Window) {
         let title = match self.active_side {
-            ActiveSide::Original => "StimStation - Original Visualization".to_string(),
-            ActiveSide::Circular => "StimStation - Circular Visualization".to_string(),
-            ActiveSide::Full => "StimStation - All Visualizations (Grid)".to_string(),
-            ActiveSide::RayPattern => "StimStation - Ray Pattern".to_string(),
-            ActiveSide::Pythagoras => "StimStation - Pythagoras Theorem".to_string(),
-            ActiveSide::FibonacciSpiral => "StimStation - Fibonacci Spiral".to_string(),
-            ActiveSide::SimpleProof => "StimStation - Simple Proof".to_string(),
-            ActiveSide::Combined => "StimStation - Combined Experience".to_string(),
+            ActiveSide::Original => "StimStation - Original Visualization",
+            ActiveSide::Circular => "StimStation - Circular Visualization",
+            ActiveSide::Full => "StimStation - All Visualizations (Grid)",
+            ActiveSide::RayPattern => "StimStation - Ray Pattern",
+            ActiveSide::Pythagoras => "StimStation - Pythagoras Theorem",
+            ActiveSide::FibonacciSpiral => "StimStation - Fibonacci Spiral",
+            ActiveSide::SimpleProof => "StimStation - Simple Proof",
+            ActiveSide::Combined => "StimStation - Combined Experience",
         };
-        window.set_title(&title);
+        
+        window.set_title(title);
     }
 }

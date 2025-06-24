@@ -8,6 +8,7 @@ pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset
     render::clear_frame(frame);
     draw_balls_and_rays(frame, width, height, time, scale_x, scale_y, x_offset, buffer_width);
     sorter_manager::draw_sorter_visualizations(frame, width, height, time, scale_x, scale_y, x_offset, buffer_width);
+    sorter_manager::draw_algorithm_stats(frame, width, height, x_offset, buffer_width);
     integration::update_and_draw_audio(frame, width, height, time, x_offset, buffer_width);
     integration::update_and_draw_text(frame, width, height, time, x_offset, buffer_width);
 }

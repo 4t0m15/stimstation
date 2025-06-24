@@ -270,19 +270,31 @@ static DOWNLOAD_WINDOW_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic
 static ERROR_WINDOW_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn show_download_progress(url: String, path: PathBuf) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    // Force reset the flag at the start to handle any stale state
+    DOWNLOAD_WINDOW_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+    
     // Check if we're already showing a download window to prevent multiple EventLoops
     if DOWNLOAD_WINDOW_ACTIVE.compare_exchange(false, true, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst).is_err() {
-        return Err("Download window already active".into());
+        println!("Download window already active, retrying...");
+        // Wait a moment and try again
+        thread::sleep(Duration::from_millis(100));
+        DOWNLOAD_WINDOW_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+        if DOWNLOAD_WINDOW_ACTIVE.compare_exchange(false, true, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst).is_err() {
+            return Err("Download window still active after retry".into());
+        }
     }
     
     // Ensure we reset the flag when this function exits
     struct FlagGuard;
     impl Drop for FlagGuard {
         fn drop(&mut self) {
+            println!("Resetting download window flag");
             DOWNLOAD_WINDOW_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
         }
     }
     let _guard = FlagGuard;
+    
+    println!("Starting download progress window for: {}", url);
     
     use std::sync::mpsc;
     
@@ -321,15 +333,23 @@ pub fn show_download_progress(url: String, path: PathBuf) -> Result<PathBuf, Box
         let _ = tx.send(());
     });
       // Create and run the progress window in the main thread
+    println!("Creating event loop for progress window...");
     let event_loop = EventLoop::new()?;
+    
+    println!("Event loop created successfully");
     
     // Get monitor dimensions for 50% sizing
     let (window_width, window_height) = if let Some(monitor) = event_loop.primary_monitor() {
         let size = monitor.size();
+        println!("Monitor size: {}x{}", size.width, size.height);
+        println!("Monitor size: {}x{}", size.width, size.height);
         (size.width / 2, size.height / 2)
     } else {
+        println!("No primary monitor found, using fallback size");
         (800, 600) // Fallback size
     };
+    
+    println!("Creating window with size: {}x{}", window_width, window_height);
     
     let window = Arc::new(
         WindowBuilder::new()
@@ -340,10 +360,18 @@ pub fn show_download_progress(url: String, path: PathBuf) -> Result<PathBuf, Box
             .build(&event_loop)?,
     );
 
+    println!("Window created successfully");
+
     // Create pixels renderer
     let window_size = window.inner_size();
+    println!("Setting up pixels renderer with size: {}x{}", window_size.width, window_size.height);
+    println!("Setting up pixels renderer with size: {}x{}", window_size.width, window_size.height);
     let surface_texture = SurfaceTexture::new(window_size.width, window_size.height, Arc::clone(&window));
-    let mut pixels = Pixels::new(window_size.width, window_size.height, surface_texture)?;    let mut last_check = std::time::Instant::now();
+    let mut pixels = Pixels::new(window_size.width, window_size.height, surface_texture)?;    
+    
+    println!("Pixels renderer created, starting event loop...");
+    
+    let mut last_check = std::time::Instant::now();
     let mut completion_start: Option<std::time::Instant> = None;
     let error_to_show = Arc::new(Mutex::new(None::<String>));
     let error_to_show_clone = Arc::clone(&error_to_show);

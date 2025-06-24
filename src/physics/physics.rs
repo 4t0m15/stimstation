@@ -1,4 +1,5 @@
-use crate::graphics::render::{draw_filled_circle, draw_shadow_glow};
+use crate::graphics::render::draw_filled_circle;
+use crate::audio::audio_handler::get_audio_spectrum;
 
 static mut YELLOW_POS: Option<(f32, f32)> = None;
 static mut GREEN_POS: Option<(f32, f32)> = None;
@@ -76,27 +77,53 @@ fn update_ball_position(pos: &mut Option<(f32, f32)>, vel: &mut Option<(f32, f32
 
 fn handle_ball_collision() {
     unsafe {
-        if let (Some(yellow_pos), Some(green_pos), Some(green_vel)) = 
-            (YELLOW_POS.as_mut(), GREEN_POS.as_mut(), GREEN_VEL.as_mut()) {
+        if let (Some(yellow_pos), Some(green_pos), Some(yellow_vel), Some(green_vel)) = 
+            (YELLOW_POS.as_mut(), GREEN_POS.as_mut(), YELLOW_VEL.as_mut(), GREEN_VEL.as_mut()) {
             let dx = green_pos.0 - yellow_pos.0;
             let dy = green_pos.1 - yellow_pos.1;
             let dist_sq = dx * dx + dy * dy;
-            let min_dist = 30.0;
+            let min_dist = 60.0; // Much larger collision distance to ensure detection
             
-            if dist_sq < min_dist * min_dist {
+            if dist_sq < min_dist * min_dist && dist_sq > 0.0 {
                 let dist = dist_sq.sqrt();
                 let nx = dx / dist;
                 let ny = dy / dist;
-                green_pos.0 = yellow_pos.0 + nx * min_dist;
-                green_pos.1 = yellow_pos.1 + ny * min_dist;
                 
-                if let Some(yellow_vel) = YELLOW_VEL.as_mut() {
-                    let dot_prod = green_vel.0 * nx + green_vel.1 * ny - yellow_vel.0 * nx - yellow_vel.1 * ny;
-                    green_vel.0 -= dot_prod * nx;
-                    green_vel.1 -= dot_prod * ny;
-                    yellow_vel.0 += dot_prod * nx;
-                    yellow_vel.1 += dot_prod * ny;
+                // Separate the balls to prevent overlap
+                let overlap = min_dist - dist;
+                let separation = overlap * 0.5;
+                yellow_pos.0 -= nx * separation;
+                yellow_pos.1 -= ny * separation;
+                green_pos.0 += nx * separation;
+                green_pos.1 += ny * separation;
+                
+                // Calculate relative velocity
+                let rel_vel_x = green_vel.0 - yellow_vel.0;
+                let rel_vel_y = green_vel.1 - yellow_vel.1;
+                
+                // Calculate relative velocity along collision normal
+                let vel_along_normal = rel_vel_x * nx + rel_vel_y * ny;
+                
+                // Don't resolve if velocities are separating
+                if vel_along_normal > 0.0 {
+                    return;
                 }
+                
+                // Calculate restitution (bounciness) - make it much more bouncy
+                let restitution = 1.2; // More than 1 for super bouncy effect
+                let impulse_magnitude = -(1.0 + restitution) * vel_along_normal;
+                
+                // Apply impulse to both balls (assuming equal mass) - make it more dramatic
+                let impulse_x = impulse_magnitude * nx * 0.5;
+                let impulse_y = impulse_magnitude * ny * 0.5;
+                
+                // Add some random deflection for more interesting bounces
+                let random_factor = (dist_sq.sin() * 0.1) as f32;
+                
+                yellow_vel.0 -= impulse_x + random_factor;
+                yellow_vel.1 -= impulse_y + random_factor;
+                green_vel.0 += impulse_x + random_factor;
+                green_vel.1 += impulse_y + random_factor;
             }
         }
     }
@@ -108,11 +135,11 @@ pub fn draw_balls_with_effects(frame: &mut [u8], width: u32, height: u32, time: 
     unsafe {
         if let Some(yellow_pos) = YELLOW_POS {
             draw_ball_with_effects(frame, width, height, yellow_pos, [255, 255, 0, 255], 
-                                 [255, 255, 150, 255], time, scale_x, scale_y, x_offset, buffer_width, &draw_rays_fn);
+                                 [255, 255, 150, 255], time, scale_x, scale_y, x_offset, buffer_width, &draw_rays_fn, true);
         }
         if let Some(green_pos) = GREEN_POS {
             draw_ball_with_effects(frame, width, height, green_pos, [0, 255, 0, 255], 
-                                 [150, 255, 150, 255], time + 0.5, scale_x, scale_y, x_offset, buffer_width, &draw_rays_fn);
+                                 [150, 255, 150, 255], time + 0.5, scale_x, scale_y, x_offset, buffer_width, &draw_rays_fn, false);
         }
     }
 }
@@ -120,17 +147,68 @@ pub fn draw_balls_with_effects(frame: &mut [u8], width: u32, height: u32, time: 
 fn draw_ball_with_effects(frame: &mut [u8], width: u32, height: u32, pos: (f32, f32), 
                          ball_color: [u8; 4], ray_color: [u8; 4], time: f32, 
                          scale_x: f32, scale_y: f32, x_offset: usize, buffer_width: u32,
-                         draw_rays_fn: &impl Fn(&mut [u8], u32, u32, (f32, f32), [u8; 4], f32, usize, u32)) {
+                         draw_rays_fn: &impl Fn(&mut [u8], u32, u32, (f32, f32), [u8; 4], f32, usize, u32),
+                         is_yellow: bool) {
     draw_rays_fn(frame, width, height, pos, ray_color, time, x_offset, buffer_width);
     
-    let ball_radius = (10.0 * scale_x.max(scale_y)) as i32;
+    // Get audio data for scaling - much more expressive scaling
+    let mut audio_scale = 1.0;
+    if let Some(spectrum) = get_audio_spectrum() {
+        if let Ok(data) = spectrum.lock() {
+            if !data.is_empty() {
+                // Use different frequency ranges for each ball - swapped frequency ranges
+                let audio_value = if is_yellow {
+                    // Yellow ball responds to high frequencies (last quarter of spectrum)
+                    let start = (data.len() * 3) / 4;
+                    let end = data.len();
+                    let mut high_avg = 0.0;
+                    for i in start..end {
+                        high_avg += data[i];
+                    }
+                    high_avg / (end - start) as f32
+                } else {
+                    // Green ball responds to bass frequencies (first quarter of spectrum)
+                    let bass_range = data.len() / 4;
+                    let mut bass_avg = 0.0;
+                    for i in 0..bass_range {
+                        bass_avg += data[i];
+                    }
+                    bass_avg / bass_range as f32
+                };
+                
+                if is_yellow {
+                    // Yellow ball: 10x more expressive scaling (normal level)
+                    let enhanced_audio = audio_value.powf(0.5); // Square root for smoother scaling
+                    audio_scale = 0.2 + enhanced_audio * 4.8; // Range: 0.2 to 5.0
+                    
+                    // Add some dynamic pulsing based on audio peaks
+                    let pulse_factor = (audio_value * 10.0).sin() * 0.3 + 1.0;
+                    audio_scale *= pulse_factor;
+                    
+                    // Limit the scaling to prevent balls from becoming too large
+                    audio_scale = audio_scale.max(0.1).min(4.0);
+                } else {
+                    // Green ball: 100x more responsive but much smaller (extreme responsiveness, compact size)
+                    let enhanced_audio = audio_value.powf(0.3); // Cube root for even more dramatic response
+                    audio_scale = 0.3 + enhanced_audio * 2.7; // Range: 0.3 to 3.0 (much smaller range but same responsiveness)
+                    
+                    // Add much more intense dynamic pulsing
+                    let pulse_factor = (audio_value * 20.0).sin() * 0.8 + 1.0; // More intense pulsing
+                    audio_scale *= pulse_factor;
+                    
+                    // Much smaller maximum limit to keep it compact
+                    audio_scale = audio_scale.max(0.1).min(2.5); // Much smaller maximum size
+                }
+            }
+        }
+    }
+    
+    let base_ball_radius = 10.0 * scale_x.max(scale_y);
+    let ball_radius = (base_ball_radius * audio_scale) as i32;
     draw_filled_circle(frame, width, height, pos.0 as i32, pos.1 as i32, 
                       ball_radius, &ball_color, x_offset, buffer_width);
     
-    let glow_radius = (30.0 * scale_x.max(scale_y)) as i32;
-    let glow_color = [ball_color[0], ball_color[1], (ball_color[2] as f32 * 0.4) as u8, 100];
-    draw_shadow_glow(frame, width, height, pos.0 as i32, pos.1 as i32, 
-                    glow_radius, &glow_color, x_offset, buffer_width);
+    // Remove glow effect completely - no more glow drawing
 }
 
 pub fn apply_force_yellow(force_x: f32, force_y: f32) {

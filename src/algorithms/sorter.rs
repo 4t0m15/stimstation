@@ -1,12 +1,60 @@
 use rand::prelude::*;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
 pub const SORT_ARRAY_SIZE: usize = 200;
 
-#[derive(Debug, PartialEq)]
+// Global statistics tracker
+static mut ALGORITHM_STATS: Option<Arc<Mutex<HashMap<SortAlgorithm, u32>>>> = None;
+
+pub fn initialize_algorithm_stats() {
+    unsafe {
+        if ALGORITHM_STATS.is_none() {
+            let mut stats = HashMap::new();
+            stats.insert(SortAlgorithm::Bogo, 0);
+            stats.insert(SortAlgorithm::Bubble, 0);
+            stats.insert(SortAlgorithm::Quick, 0);
+            ALGORITHM_STATS = Some(Arc::new(Mutex::new(stats)));
+        }
+    }
+}
+
+pub fn get_algorithm_stats() -> Option<Arc<Mutex<HashMap<SortAlgorithm, u32>>>> {
+    unsafe { ALGORITHM_STATS.clone() }
+}
+
+pub fn get_leading_algorithm() -> Option<(SortAlgorithm, u32)> {
+    unsafe {
+        if let Some(stats) = &ALGORITHM_STATS {
+            if let Ok(stats_map) = stats.lock() {
+                let mut leader = (SortAlgorithm::Bubble, 0);
+                for (algorithm, count) in stats_map.iter() {
+                    if *count > leader.1 {
+                        leader = (algorithm.clone(), *count);
+                    }
+                }
+                return Some(leader);
+            }
+        }
+        None
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum SortAlgorithm {
     Bogo,
     Bubble,
     Quick,
+}
+
+impl SortAlgorithm {
+    pub fn name(&self) -> &'static str {
+        match self {
+            SortAlgorithm::Bogo => "Bogo Sort",
+            SortAlgorithm::Bubble => "Bubble Sort", 
+            SortAlgorithm::Quick => "Quick Sort",
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -89,6 +137,7 @@ impl SortVisualizer {
         }
         if is_sorted {
             self.state = SortState::Completed;
+            self.record_completion();
         } else {
             let mut rng = thread_rng();
             self.array.shuffle(&mut rng);
@@ -101,6 +150,7 @@ impl SortVisualizer {
         if self.i >= n {
             if self.j == 0 {
                 self.state = SortState::Completed;
+                self.record_completion();
             } else {
                 self.i = 0;
                 self.j = 0;
@@ -122,6 +172,7 @@ impl SortVisualizer {
     fn update_quick(&mut self) {
         if self.stack.is_empty() {
             self.state = SortState::Completed;
+            self.record_completion();
             return;
         }
         let (low, high) = self.stack.pop().unwrap();
@@ -191,6 +242,18 @@ impl SortVisualizer {
                 let bar_x = x + width - bar_height;
                 let bar_y = y + i * bar_width;
                 draw_rectangle(frame, bar_x, bar_y, bar_height, bar_width, color, x_offset, buffer_width);
+            }
+        }
+    }
+    
+    fn record_completion(&self) {
+        unsafe {
+            if let Some(stats) = &ALGORITHM_STATS {
+                if let Ok(mut stats_map) = stats.lock() {
+                    if let Some(count) = stats_map.get_mut(&self.algorithm) {
+                        *count += 1;
+                    }
+                }
             }
         }
     }

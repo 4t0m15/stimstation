@@ -1,4 +1,4 @@
-# Mesmerise
+# stimstation
 
 A visual effects application built with Rust and Pixels that provides mesmerizing visualizations.
 

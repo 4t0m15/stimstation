@@ -1,14 +1,17 @@
 use std::sync::{Arc, Mutex};
 use rand::prelude::*;
-pub const AUDIO_VIZ_BARS: usize = 32;
-pub const AUDIO_VIZ_BASE_HEIGHT: f32 = 60.0;
-pub const AUDIO_VIZ_MIN_HEIGHT: f32 = 5.0;
-pub const AUDIO_VIZ_DECAY_RATE: f32 = 2.0;
+pub const AUDIO_VIZ_BARS: usize = 64; // Doubled from 32 to 64 for more expressiveness
+pub const AUDIO_VIZ_BASE_HEIGHT: f32 = 80.0; // Increased base height for more dramatic effect
+pub const AUDIO_VIZ_MIN_HEIGHT: f32 = 3.0; // Reduced minimum height for more dynamic range
+pub const AUDIO_VIZ_DECAY_RATE: f32 = 3.0; // Increased decay rate for more responsive bars
 static mut AUDIO_SPECTRUM: Option<Arc<Mutex<Vec<f32>>>> = None;
 pub struct AudioVisualizer {
     spectrum: Vec<f32>,
     target_heights: Vec<f32>,
     current_heights: Vec<f32>,
+    peak_heights: Vec<f32>,  // Track peak heights for falling dots effect
+    peak_timers: Vec<f32>,   // Timers for peak dots
+    bar_velocities: Vec<f32>, // Velocity for more dynamic movement
     last_update: f32,
 }
 impl AudioVisualizer {
@@ -16,15 +19,26 @@ impl AudioVisualizer {
         let mut spectrum = Vec::with_capacity(AUDIO_VIZ_BARS);
         let mut target_heights = Vec::with_capacity(AUDIO_VIZ_BARS);
         let mut current_heights = Vec::with_capacity(AUDIO_VIZ_BARS);
+        let mut peak_heights = Vec::with_capacity(AUDIO_VIZ_BARS);
+        let mut peak_timers = Vec::with_capacity(AUDIO_VIZ_BARS);
+        let mut bar_velocities = Vec::with_capacity(AUDIO_VIZ_BARS);
+        
         for _ in 0..AUDIO_VIZ_BARS {
             spectrum.push(0.0);
             target_heights.push(0.0);
             current_heights.push(0.0);
+            peak_heights.push(0.0);
+            peak_timers.push(0.0);
+            bar_velocities.push(0.0);
         }
+        
         Self {
             spectrum,
             target_heights,
             current_heights,
+            peak_heights,
+            peak_timers,
+            bar_velocities,
             last_update: 0.0,
         }
     }

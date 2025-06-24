@@ -35,7 +35,7 @@ pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
             let potential_path = dirs::data_dir()
                 .unwrap_or_else(|| std::env::current_dir().unwrap())
                 .join("stimstation")
-                .join("shizuo_tribute_mix.flac");
+                .join("foregone_destruction_remastered.flac");
             if potential_path.exists() {
                 Some(potential_path)
             } else {

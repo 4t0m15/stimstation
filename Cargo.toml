@@ -1,5 +1,5 @@
 [package]
-name = "mesmerise"
+name = "stimstation"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,7 @@ name = "stimstation"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mesmerise"
+name = "stimstation"
 path = "src/main.rs"
 
 [dependencies]

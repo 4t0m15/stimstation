@@ -1,4 +1,4 @@
-use crate::render::{draw_filled_circle, draw_shadow_glow};
+use crate::graphics::render::{draw_filled_circle, draw_shadow_glow};
 
 static mut YELLOW_POS: Option<(f32, f32)> = None;
 static mut GREEN_POS: Option<(f32, f32)> = None;
@@ -27,6 +27,7 @@ pub fn get_ball_positions() -> (Option<(f32, f32)>, Option<(f32, f32)>) {
 }
 
 pub fn update_physics(width: u32, height: u32, time: f32, scale_x: f32, scale_y: f32) {
+    initialize_balls(width, height, scale_x, scale_y);
     let dt = calculate_delta_time(time);
     unsafe {
         update_ball_position(&mut YELLOW_POS, &mut YELLOW_VEL, width, height, dt, scale_x, scale_y);

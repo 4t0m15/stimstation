@@ -1,5 +1,5 @@
-use crate::audio_integration::AudioIntegration;
-use crate::text_processor::TextProcessor;
+use crate::audio::audio_integration::AudioIntegration;
+use crate::text::text_processor::TextProcessor;
 use winit::monitor::MonitorHandle;
 
 static mut AUDIO_INTEGRATION: Option<AudioIntegration> = None;
@@ -42,11 +42,6 @@ pub fn update_and_draw_audio(frame: &mut [u8], width: u32, height: u32, time: f3
 }
 
 pub fn initialize_text_renderer() {
-    unsafe {
-        if TEXT_RENDERER.is_none() {
-            TEXT_RENDERER = Some(TextProcessor::new());
-        }
-    }
 }
 
 pub fn update_and_draw_text(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset: usize, buffer_width: u32) {

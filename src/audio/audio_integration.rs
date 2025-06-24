@@ -1,5 +1,5 @@
-use crate::audio_handler::AudioVisualizer;
-use crate::audio_playback::{start_audio_thread, is_audio_thread_started};
+use crate::audio::audio_handler::AudioVisualizer;
+use crate::audio::audio_playback::{start_audio_thread, is_audio_thread_started};
 pub struct AudioIntegration {
     visualizer: Option<AudioVisualizer>,
 }

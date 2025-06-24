@@ -168,4 +168,48 @@ impl SortVisualizer {
     pub fn restart(&mut self) {
         self.state = SortState::Restarting;
     }
+    
+    pub fn draw(&self, frame: &mut [u8], x: usize, y: usize, width: usize, height: usize, 
+               horizontal: bool, x_offset: usize, buffer_width: u32) {
+        let len = self.array.len();
+        let bar_width = if horizontal { width / len } else { height / len };
+        let max_height = if horizontal { height } else { width };
+        
+        for (i, &value) in self.array.iter().enumerate() {
+            let bar_height = (value as f32 / 256.0 * max_height as f32) as usize;
+            let color = match self.state {
+                SortState::Running => [100, 150, 255, 255],
+                SortState::Completed => [100, 255, 100, 255],
+                SortState::Restarting => [255, 100, 100, 255],
+            };
+            
+            if horizontal {
+                let bar_x = x + i * bar_width;
+                let bar_y = y + height - bar_height;
+                draw_rectangle(frame, bar_x, bar_y, bar_width, bar_height, color, x_offset, buffer_width);
+            } else {
+                let bar_x = x + width - bar_height;
+                let bar_y = y + i * bar_width;
+                draw_rectangle(frame, bar_x, bar_y, bar_height, bar_width, color, x_offset, buffer_width);
+            }
+        }
+    }
+}
+
+fn draw_rectangle(frame: &mut [u8], x: usize, y: usize, width: usize, height: usize, 
+                 color: [u8; 4], x_offset: usize, buffer_width: u32) {
+    for dy in 0..height {
+        for dx in 0..width {
+            let pixel_x = x + dx;
+            let pixel_y = y + dy;
+            let idx = 4 * ((pixel_y * buffer_width as usize) + pixel_x + x_offset);
+            
+            if idx + 3 < frame.len() {
+                frame[idx] = color[0];
+                frame[idx + 1] = color[1]; 
+                frame[idx + 2] = color[2];
+                frame[idx + 3] = color[3];
+            }
+        }
+    }
 }

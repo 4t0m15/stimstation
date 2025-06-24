@@ -1,4 +1,4 @@
-use crate::types::{WIDTH, HEIGHT};
+use crate::core::types::{WIDTH, HEIGHT};
 pub fn set_pixel_safe(frame: &mut [u8], x: i32, y: i32, width: u32, height: u32, color: [u8; 4]) {
     if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
         let idx = 4 * (y as usize * width as usize + x as usize);

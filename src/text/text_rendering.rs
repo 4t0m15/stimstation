@@ -1,8 +1,8 @@
 use ab_glyph::{Font, FontArc, PxScale};
 use font_kit::source::SystemSource;
 use once_cell::sync::Lazy;
-use crate::pixel_utils::blend_pixel_safe;
-use crate::types::HEIGHT;
+use crate::graphics::pixel_utils::blend_pixel_safe;
+use crate::core::types::HEIGHT;
 static FONT: Lazy<FontArc> = Lazy::new(|| {
     let handle = SystemSource::new()
         .select_best_match(&[font_kit::family_name::FamilyName::SansSerif], &Default::default())

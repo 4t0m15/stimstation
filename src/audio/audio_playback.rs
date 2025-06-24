@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::thread;
 use std::time::Duration;
 use rand::prelude::*;
-use crate::audio_handler::{analyze_audio, set_audio_spectrum, AUDIO_VIZ_BARS};
+use crate::audio::audio_handler::{analyze_audio, set_audio_spectrum, AUDIO_VIZ_BARS};
 static AUDIO_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
 pub struct NoiseSource {
     sample_rate: u32,

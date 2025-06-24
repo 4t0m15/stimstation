@@ -5,13 +5,22 @@ use winit::{
     event::{Event, WindowEvent},
     event_loop::{EventLoop, ControlFlow},
     window::WindowBuilder,
+    monitor::MonitorHandle,
 };
 use winit_input_helper::WinitInputHelper;
 use stimstation::{
     types::{HEIGHT, WIDTH},
+    orchestrator, integration,
 };
-mod app;
-use crate::app::App;
+use stimstation::app::App;
+pub fn set_monitor_dimensions(monitor: &MonitorHandle) {
+    integration::set_monitor_dimensions(monitor);
+}
+
+pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset: usize, buffer_width: u32) {
+    orchestrator::draw_frame(frame, width, height, time, x_offset, buffer_width);
+}
+
 fn main() -> Result<(), Error> {
     let event_loop = EventLoop::new().unwrap();
     let mut input = WinitInputHelper::new();

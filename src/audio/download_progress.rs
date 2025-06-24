@@ -265,21 +265,52 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
     }
 }
 
+// Global flag to track if we're already showing a download window
+static DOWNLOAD_WINDOW_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static ERROR_WINDOW_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub fn show_download_progress(url: String, path: PathBuf) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    // Check if we're already showing a download window to prevent multiple EventLoops
+    if DOWNLOAD_WINDOW_ACTIVE.compare_exchange(false, true, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst).is_err() {
+        return Err("Download window already active".into());
+    }
+    
+    // Ensure we reset the flag when this function exits
+    struct FlagGuard;
+    impl Drop for FlagGuard {
+        fn drop(&mut self) {
+            DOWNLOAD_WINDOW_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _guard = FlagGuard;
+    
     use std::sync::mpsc;
     
     // Create a channel to communicate between threads
     let (tx, rx) = mpsc::channel();
     
-    // Spawn the download in a separate thread
+    // Spawn the download in a separate thread with proper Tokio runtime
     let download_url = url.clone();
     let download_path = path.clone();
     let progress_handle = Arc::new(Mutex::new(DownloadProgress::default()));
     let download_progress = Arc::clone(&progress_handle);
-    
-    thread::spawn(move || {
-        // Use futures executor
-        futures::executor::block_on(async {
+      thread::spawn(move || {
+        // Create a new Tokio runtime for this thread
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build() {
+            Ok(rt) => rt,
+            Err(e) => {
+                let mut p = download_progress.lock().unwrap();
+                p.status = DownloadStatus::Error;
+                p.message = format!("Failed to create async runtime: {}", e);
+                let _ = tx.send(());
+                return;
+            }
+        };
+        
+        // Run the download within the Tokio runtime
+        rt.block_on(async {
             if let Err(e) = download_with_progress(&download_url, &download_path, download_progress.clone()).await {
                 let mut p = download_progress.lock().unwrap();
                 p.status = DownloadStatus::Error;
@@ -289,14 +320,23 @@ pub fn show_download_progress(url: String, path: PathBuf) -> Result<PathBuf, Box
         // Signal that download thread is done
         let _ = tx.send(());
     });
-    
-    // Create and run the progress window in the main thread
+      // Create and run the progress window in the main thread
     let event_loop = EventLoop::new()?;
+    
+    // Get monitor dimensions for 50% sizing
+    let (window_width, window_height) = if let Some(monitor) = event_loop.primary_monitor() {
+        let size = monitor.size();
+        (size.width / 2, size.height / 2)
+    } else {
+        (800, 600) // Fallback size
+    };
+    
     let window = Arc::new(
         WindowBuilder::new()
             .with_title("StimStation - Downloading Audio")
-            .with_inner_size(LogicalSize::new(600.0, 150.0))
+            .with_inner_size(LogicalSize::new(window_width as f64, window_height as f64))
             .with_resizable(false)
+            .with_decorations(false) // Remove window borders and title bar
             .build(&event_loop)?,
     );
 
@@ -393,13 +433,37 @@ pub fn show_download_progress(url: String, path: PathBuf) -> Result<PathBuf, Box
 }
 
 pub fn show_error_window(error_message: String) -> Result<(), Box<dyn std::error::Error>> {
+    // Check if we're already showing an error window to prevent multiple EventLoops
+    if ERROR_WINDOW_ACTIVE.compare_exchange(false, true, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst).is_err() {
+        eprintln!("Error window already active, printing error to console: {}", error_message);
+        return Ok(());
+    }
+    
+    // Ensure we reset the flag when this function exits
+    struct ErrorFlagGuard;
+    impl Drop for ErrorFlagGuard {
+        fn drop(&mut self) {
+            ERROR_WINDOW_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _guard = ErrorFlagGuard;
     // Create and run the error window
     let event_loop = EventLoop::new()?;
+    
+    // Get monitor dimensions for 50% sizing
+    let (window_width, window_height) = if let Some(monitor) = event_loop.primary_monitor() {
+        let size = monitor.size();
+        (size.width / 2, size.height / 2)
+    } else {
+        (800, 600) // Fallback size
+    };
+    
     let window = Arc::new(
         WindowBuilder::new()
             .with_title("StimStation - Download Error")
-            .with_inner_size(LogicalSize::new(500.0, 200.0))
+            .with_inner_size(LogicalSize::new(window_width as f64, window_height as f64))
             .with_resizable(false)
+            .with_decorations(false) // Remove window borders and title bar
             .build(&event_loop)?,
     );
 

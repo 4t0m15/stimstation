@@ -10,6 +10,7 @@ use crate::audio::white_noise::NoiseSource;
 use crate::audio::audio_download::ensure_audio_file;
 static AUDIO_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
 static WHITE_NOISE_ENABLED: AtomicBool = AtomicBool::new(true);
+static DOWNLOAD_ATTEMPTED: AtomicBool = AtomicBool::new(false);
 
 pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
     if AUDIO_THREAD_STARTED.load(Ordering::SeqCst) {
@@ -17,12 +18,27 @@ pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
     }
     AUDIO_THREAD_STARTED.store(true, Ordering::SeqCst);
     let audio_spectrum = Arc::new(Mutex::new(vec![0.0; AUDIO_VIZ_BARS]));
-    set_audio_spectrum(audio_spectrum.clone());
-    let handle = thread::spawn(move || {        // Try to get the audio file - use blocking approach with futures executor
-        let audio_path = match futures::executor::block_on(ensure_audio_file()) {
-            Ok(path) => Some(path),
-            Err(e) => {
-                eprintln!("Failed to ensure audio file: {}", e);
+    set_audio_spectrum(audio_spectrum.clone());    let handle = thread::spawn(move || {        
+        // Try to get the audio file - use blocking approach with futures executor
+        // Only attempt download once per application run
+        let audio_path = if !DOWNLOAD_ATTEMPTED.load(Ordering::SeqCst) {
+            DOWNLOAD_ATTEMPTED.store(true, Ordering::SeqCst);
+            match futures::executor::block_on(ensure_audio_file()) {
+                Ok(path) => Some(path),
+                Err(e) => {
+                    eprintln!("Failed to ensure audio file: {}", e);
+                    None
+                }
+            }
+        } else {
+            // Check if file exists without attempting download
+            let potential_path = dirs::data_dir()
+                .unwrap_or_else(|| std::env::current_dir().unwrap())
+                .join("stimstation")
+                .join("shizuo_tribute_mix.flac");
+            if potential_path.exists() {
+                Some(potential_path)
+            } else {
                 None
             }
         };

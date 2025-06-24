@@ -82,6 +82,7 @@ pub fn draw_keyboard_guide(frame: &mut [u8], width: u32) {
         "[=] - Add Lines",
         "[-] - Remove Lines",
         "[E] - Explosion",
+        "[9] - Toggle White Noise",
         "Right Mouse - Explosion at cursor",
     ];
     let mut y = 30.0;

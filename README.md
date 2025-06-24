@@ -37,6 +37,7 @@ A visual effects application built with Rust and Pixels that provides mesmerizin
 - **2**: Show only the circular visualization
 - **3**: Show full-screen mode with all visualizations
 - **4**: Show ray pattern visualization (default)
+- **9**: Toggle white noise on/off
 - **F11** or **Alt+Enter**: Toggle fullscreen mode
 - **Escape**: Exit
 

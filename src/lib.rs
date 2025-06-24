@@ -49,11 +49,21 @@ pub mod app {
         pub fn quit(&mut self) {
             self.quit = true;
         }
-        
-        pub fn handle_input(&mut self, input: &mut winit_input_helper::WinitInputHelper, _window: &winit::window::Window) {
+          pub fn handle_input(&mut self, input: &mut winit_input_helper::WinitInputHelper, _window: &winit::window::Window) {
             // Add input handling for physics forces, etc.
             if input.key_pressed(KeyCode::Escape) {
                 self.quit();
+            }
+            
+            // Toggle white noise with '9' key
+            if input.key_pressed(KeyCode::Digit9) {
+                let enabled = !crate::audio::audio_playback::is_white_noise_enabled();
+                crate::audio::audio_playback::set_white_noise_enabled(enabled);
+                if enabled {
+                    println!("White noise enabled");
+                } else {
+                    println!("White noise disabled");
+                }
             }
             
             // Example: Add force to balls with arrow keys

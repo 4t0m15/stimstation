@@ -1,39 +1,30 @@
-// Audio playback and noise generation
 use rodio::{OutputStream, Sink, Source};
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::thread;
 use std::time::Duration;
 use rand::prelude::*;
 use crate::audio_handler::{analyze_audio, set_audio_spectrum, AUDIO_VIZ_BARS};
-
-// Audio thread management
 static AUDIO_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
-
-// White noise generator for rodio
 pub struct NoiseSource {
     sample_rate: u32,
     position: usize,
     amplitude: f32,
 }
-
 impl NoiseSource {
     pub fn new(sample_rate: u32) -> Self {
         Self {
             sample_rate,
             position: 0,
-            amplitude: 0.25, // 25% volume to avoid being too loud
+            amplitude: 0.25,
         }
     }
-    
     pub fn with_amplitude(mut self, amplitude: f32) -> Self {
         self.amplitude = amplitude.clamp(0.0, 1.0);
         self
     }
 }
-
 impl Iterator for NoiseSource {
     type Item = f32;
-    
     fn next(&mut self) -> Option<f32> {
         self.position += 1;
         let mut rng = rand::thread_rng();
@@ -41,42 +32,28 @@ impl Iterator for NoiseSource {
         Some(noise)
     }
 }
-
 impl Source for NoiseSource {
     fn current_frame_len(&self) -> Option<usize> {
         None
     }
-    
     fn channels(&self) -> u16 {
-        1 // Mono
+        1
     }
-    
     fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
-    
     fn total_duration(&self) -> Option<Duration> {
-        None // Infinite
+        None
     }
 }
-
-// Start audio playback and analysis thread
 pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
-    // Check if already started
     if AUDIO_THREAD_STARTED.load(Ordering::SeqCst) {
         return None;
     }
     AUDIO_THREAD_STARTED.store(true, Ordering::SeqCst);
-    
-    // Initialize the audio spectrum data
     let audio_spectrum = Arc::new(Mutex::new(vec![0.0; AUDIO_VIZ_BARS]));
-    
-    // Store it in the audio handler
     set_audio_spectrum(audio_spectrum.clone());
-    
-    // Create a thread for audio playback and analysis
     let handle = thread::spawn(move || {
-        // Try to get the output stream
         let (_stream, stream_handle) = match OutputStream::try_default() {
             Ok(result) => result,
             Err(e) => {
@@ -84,8 +61,6 @@ pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
                 return;
             }
         };
-        
-        // Create a sink to play our audio
         let sink = match Sink::try_new(&stream_handle) {
             Ok(sink) => sink,
             Err(e) => {
@@ -93,65 +68,39 @@ pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
                 return;
             }
         };
-        
-        // Create our noise source
         let sample_rate = 44100;
-        let noise = NoiseSource::new(sample_rate).with_amplitude(0.15); // Lower volume
-        
-        // Set up a buffer to analyze
+        let noise = NoiseSource::new(sample_rate).with_amplitude(0.15);
         let buffer_size = 1024;
         let mut audio_buffer = vec![0.0; buffer_size];
         let mut buffer_pos = 0;
-        
-        // Add the noise source to the sink
         sink.append(noise);
-        
-        // Keep the sink playing and analyze audio
         while !sink.empty() {
-            // Sleep a bit to avoid hogging the CPU
             thread::sleep(Duration::from_millis(10));
-            
-            // Simulate audio capture and analysis
-            for _ in 0..buffer_size/10 {  // Process some samples each time
-                // Generate a new sample (similar to our noise source)
+            for _ in 0..buffer_size/10 {
                 let noise = rand::thread_rng().gen_range(-1.0..1.0) * 0.15;
-                
-                // Add to buffer
                 audio_buffer[buffer_pos] = noise;
                 buffer_pos = (buffer_pos + 1) % buffer_size;
-                
-                // Every time we fill the buffer, analyze it
                 if buffer_pos == 0 {
                     analyze_audio(&audio_buffer, audio_spectrum.clone());
                 }
             }
         }
-        
-        // Mark as not started when thread exits
         AUDIO_THREAD_STARTED.store(false, Ordering::SeqCst);
     });
-    
     Some(handle)
 }
-
-// Check if audio thread is running
 pub fn is_audio_thread_started() -> bool {
     AUDIO_THREAD_STARTED.load(Ordering::SeqCst)
 }
-
-// Stop the audio thread (for cleanup)
 pub fn stop_audio_thread() {
     AUDIO_THREAD_STARTED.store(false, Ordering::SeqCst);
 }
-
-// Create a simple tone generator (alternative to noise)
 pub struct ToneSource {
     sample_rate: u32,
     frequency: f32,
     amplitude: f32,
     position: f32,
 }
-
 impl ToneSource {
     pub fn new(sample_rate: u32, frequency: f32) -> Self {
         Self {
@@ -161,16 +110,13 @@ impl ToneSource {
             position: 0.0,
         }
     }
-    
     pub fn with_amplitude(mut self, amplitude: f32) -> Self {
         self.amplitude = amplitude.clamp(0.0, 1.0);
         self
     }
 }
-
 impl Iterator for ToneSource {
     type Item = f32;
-    
     fn next(&mut self) -> Option<f32> {
         let sample = (self.position * 2.0 * std::f32::consts::PI * self.frequency / self.sample_rate as f32).sin() * self.amplitude;
         self.position += 1.0;
@@ -180,21 +126,17 @@ impl Iterator for ToneSource {
         Some(sample)
     }
 }
-
 impl Source for ToneSource {
     fn current_frame_len(&self) -> Option<usize> {
         None
     }
-    
     fn channels(&self) -> u16 {
-        1 // Mono
+        1
     }
-    
     fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
-    
     fn total_duration(&self) -> Option<Duration> {
-        None // Infinite
+        None
     }
 }

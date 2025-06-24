@@ -1,336 +1,59 @@
-// Ray pattern visualization inspired by the yellow and green rays image
 use rand::prelude::*;
-use winit::monitor::MonitorHandle;
-use crate::audio_integration::AudioIntegration;
-use crate::text_processor::TextProcessor;
+use crate::sorter::{SortVisualizer, SortAlgorithm, SortState};
+use crate::render::{draw_line, draw_filled_circle, draw_shadow_glow};
+use crate::integration::{
+    set_monitor_dimensions as set_monitor_dims, 
+    get_monitor_dimensions, 
+    initialize_audio_integration, 
+    update_and_draw_audio,
+    initialize_text_renderer,
+    update_and_draw_text
+};
 
-// Number of rays for each source
 const RAY_COUNT: usize = 60;
 
-// Sorting visualization data
-const SORT_ARRAY_SIZE: usize = 200; // A more reasonable size that won't cause overflow
-struct SortVisualizer {
-    array: Vec<u8>,
-    steps: usize,
-    algorithm: SortAlgorithm,
-    state: SortState,
-    i: usize,
-    j: usize,
-    pivot: usize,
-    stack: Vec<(usize, usize)>, // For quicksort
-    comparisons: usize,
-    accesses: usize,
-}
-
-#[derive(Debug, PartialEq)]
-enum SortAlgorithm {
-    Bogo,
-    Bubble,
-    Quick,
-}
-
-#[derive(Debug, PartialEq)]
-enum SortState {
-    Running,
-    Completed,
-    Restarting,
-}
-
-impl SortVisualizer {
-    fn new(algorithm: SortAlgorithm) -> Self {
-        let mut array = Vec::with_capacity(SORT_ARRAY_SIZE);
-        for i in 1..=SORT_ARRAY_SIZE {
-            array.push((i % 255) as u8);
-        }
-        
-        let mut rng = thread_rng();
-        array.shuffle(&mut rng);
-        
-        Self {
-            array,
-            steps: 0,
-            algorithm,
-            state: SortState::Running,
-            i: 0,
-            j: 0,
-            pivot: 0,
-            stack: Vec::new(),
-            comparisons: 0,
-            accesses: 0,
-        }
-    }
-    
-    fn update(&mut self) {
-        if self.state == SortState::Completed {
-            return;
-        }
-        
-        if self.state == SortState::Restarting {
-            let mut rng = thread_rng();
-            self.array.shuffle(&mut rng);
-            
-            self.state = SortState::Running;
-            self.steps = 0;
-            self.i = 0;
-            self.j = 0;
-            self.comparisons = 0;
-            self.accesses = 0;
-            self.stack.clear();
-            
-            if self.algorithm == SortAlgorithm::Quick {
-                self.stack.push((0, self.array.len() - 1));
-            }
-            
-            return;
-        }
-        
-        match self.algorithm {
-            SortAlgorithm::Bogo => self.update_bogo(),
-            SortAlgorithm::Bubble => self.update_bubble(),
-            SortAlgorithm::Quick => self.update_quick(),
-        }
-        
-        self.steps += 1;
-    }
-    
-    fn update_bogo(&mut self) {
-        let mut is_sorted = true;
-        for i in 1..self.array.len() {
-            self.accesses += 2;
-            if self.array[i-1] > self.array[i] {
-                is_sorted = false;
-                break;
-            }
-        }
-        
-        if is_sorted {
-            self.state = SortState::Completed;
-        } else {
-            let mut rng = thread_rng();
-            self.array.shuffle(&mut rng);
-            self.accesses += self.array.len() * 2;
-        }
-    }
-    
-    fn update_bubble(&mut self) {
-        // Bubble sort implementation
-        // One step of bubble sort
-        let n = self.array.len();
-        
-        // Check if we've completed a full pass
-        if self.i >= n {
-            // Check if any swaps were made in this pass
-            if self.j == 0 {
-                // No swaps were made, array is sorted
-                self.state = SortState::Completed;
-            } else {
-                // Start a new pass
-                self.i = 0;
-                self.j = 0;
-            }
-            return;
-        }
-        
-        // Compare adjacent elements
-        if self.i < n - 1 {
-            self.comparisons += 1;
-            self.accesses += 2; // Reading two elements
-            
-            if self.array[self.i] > self.array[self.i + 1] {
-                // Swap elements
-                self.array.swap(self.i, self.i + 1);
-                self.accesses += 2; // Writing two elements
-                self.j += 1; // Count the swap
-            }
-        }
-        
-        // Move to next comparison
-        self.i += 1;
-    }
-    
-    fn update_quick(&mut self) {
-        // Quick sort implementation (iterative version using a stack)
-        if self.stack.is_empty() {
-            self.state = SortState::Completed;
-            return;
-        }
-        
-        // Pop a subarray from stack
-        let (low, high) = self.stack.pop().unwrap();
-        
-        // If there's only one element in this subarray, continue
-        if low >= high {
-            return;
-        }
-        
-        // Partition the array
-        let pivot = self.partition(low, high);
-        
-        // Push subarrays to stack
-        if pivot > 0 && pivot - 1 > low {
-            self.stack.push((low, pivot - 1));
-        }
-        if pivot + 1 < high {
-            self.stack.push((pivot + 1, high));
-        }
-    }
-    
-    fn partition(&mut self, low: usize, high: usize) -> usize {
-        let pivot = self.array[high];
-        self.accesses += 1;
-        
-        let mut i = low;
-        
-        for j in low..high {
-            self.comparisons += 1;
-            self.accesses += 1;
-            
-            if self.array[j] <= pivot {
-                self.array.swap(i, j);
-                self.accesses += 4;
-                i += 1;
-            }
-        }
-        
-        self.array.swap(i, high);
-        self.accesses += 4;
-        
-        i
-    }
-    
-    fn draw(&self, frame: &mut [u8], x: usize, y: usize, width: usize, height: usize, 
-           horizontal: bool, x_offset: usize, buffer_width: u32) {
-        let n = self.array.len();
-        
-        let sorted_percent = self.get_sorted_percent();
-        let r = ((1.0 - sorted_percent) * 255.0) as u8;
-        let g = (sorted_percent * 255.0) as u8;
-        let b = 50;
-        
-        if horizontal {
-            let bar_width = width as f32 / n as f32;
-            
-            for i in 0..n {
-                let bar_height = (self.array[i] as f32 / 255.0 * height as f32) as usize;
-                
-                let color = if self.state == SortState::Running &&
-                               ((self.algorithm == SortAlgorithm::Bubble && (i == self.i || i == self.i + 1)) ||
-                                (self.algorithm == SortAlgorithm::Quick && i == self.pivot)) {
-                    [255, 255, 0]
-                } else {
-                    [r, g, b]
-                };
-                
-                for j in 0..bar_height {
-                    for k in 0..(bar_width as usize) {
-                        let mut current_height = height as u32;
-                        if let Some(mon_h) = unsafe { MONITOR_HEIGHT } {
-                            current_height = mon_h;
-                        }
-
-                        put_pixel_safe(frame, (x + (i as f32 * bar_width) as usize + k) as i32, (y + height - j - 1) as i32, buffer_width, current_height, [color[0], color[1], color[2], 255], x_offset);
-                    }
-                }
-            }
-        } else {
-            let bar_height = height as f32 / n as f32;
-            
-            for i in 0..n {
-                let bar_width = (self.array[i] as f32 / 255.0 * width as f32) as usize;
-                
-                let color = if self.state == SortState::Running &&
-                               ((self.algorithm == SortAlgorithm::Bubble && (i == self.i || i == self.i + 1)) ||
-                                (self.algorithm == SortAlgorithm::Quick && i == self.pivot)) {
-                    [255, 255, 0]
-                } else {
-                    [r, g, b]
-                };
-                
-                for j in 0..bar_width {
-                    for k in 0..(bar_height as usize) {
-                         let mut current_height = height as u32;
-                        if let Some(mon_h) = unsafe { MONITOR_HEIGHT } {
-                            current_height = mon_h;
-                        }
-                        put_pixel_safe(frame, (x + j) as i32, (y + (i as f32 * bar_height) as usize + k) as i32, buffer_width, current_height, [color[0], color[1], color[2], 255], x_offset);
-                    }
-                }
-            }
-        }
-    }
-    
-    fn get_sorted_percent(&self) -> f32 {
-        let mut sorted_count = 0;
-        
-        for i in 1..self.array.len() {
-            if self.array[i-1] <= self.array[i] {
-                sorted_count += 1;
-            }
-        }
-        
-        sorted_count as f32 / (self.array.len() - 1) as f32
-    }
-    
-    fn restart(&mut self) {
-        self.state = SortState::Restarting;
-    }
-}
-
-// Static instances for sorting visualizers
 static mut TOP_SORTER: Option<SortVisualizer> = None;
 static mut BOTTOM_SORTER: Option<SortVisualizer> = None;
 static mut LEFT_SORTER: Option<SortVisualizer> = None;
 static mut RIGHT_SORTER: Option<SortVisualizer> = None;
-
-// Static instances for new modules
-static mut AUDIO_INTEGRATION: Option<AudioIntegration> = None;
-static mut TEXT_RENDERER: Option<TextProcessor> = None;
-static mut MONITOR_WIDTH: Option<u32> = None;
-static mut MONITOR_HEIGHT: Option<u32> = None;
-
-// Ball positions and velocities
 static mut YELLOW_POS: Option<(f32, f32)> = None;
 static mut GREEN_POS: Option<(f32, f32)> = None;
 static mut YELLOW_VEL: Option<(f32, f32)> = None;
 static mut GREEN_VEL: Option<(f32, f32)> = None;
 static mut LAST_TIME: Option<f32> = None;
 
-pub fn set_monitor_dimensions(monitor: &MonitorHandle) {
-    let size = monitor.size();
-    unsafe {
-        MONITOR_WIDTH = Some(size.width);
-        MONITOR_HEIGHT = Some(size.height);
-        println!("Monitor dimensions set: {}x{}", size.width, size.height);
+pub fn set_monitor_dimensions(monitor: &winit::monitor::MonitorHandle) {
+    set_monitor_dims(monitor);
+}
+
+pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset: usize, buffer_width: u32) {
+    let (scale_x, scale_y) = get_scale_factors(width, height);
+    
+    initialize_systems();
+    update_physics(width, height, time, scale_x, scale_y);
+    clear_frame(frame);
+    draw_balls_and_rays(frame, width, height, time, scale_x, scale_y, x_offset, buffer_width);
+    draw_sorter_visualizations(frame, width, height, time, scale_x, scale_y, x_offset, buffer_width);
+    update_and_draw_audio(frame, width, height, time, x_offset, buffer_width);
+    update_and_draw_text(frame, width, height, time, x_offset, buffer_width);
+}
+
+fn get_scale_factors(width: u32, height: u32) -> (f32, f32) {
+    let (monitor_width, monitor_height) = get_monitor_dimensions();
+    match (monitor_width, monitor_height) {
+        (Some(m_width), Some(m_height)) => {
+            let base_width = 1920.0;
+            let base_height = 1080.0;
+            (m_width as f32 / base_width, m_height as f32 / base_height)
+        },
+        _ => (1.0, 1.0)
     }
 }
 
-// Draw the frame
-pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset: usize, buffer_width: u32) {
-    // Get scale factors based on monitor dimensions
-    let (scale_x, scale_y) = unsafe {
-        match (MONITOR_WIDTH, MONITOR_HEIGHT) {
-            (Some(m_width), Some(m_height)) => {
-                // Scale based on monitor dimensions
-                // Use a reasonable base size for reference
-                let base_width = 1920.0;
-                let base_height = 1080.0;
-                (m_width as f32 / base_width, m_height as f32 / base_height)
-            },
-            _ => (1.0, 1.0) // Default scale if monitor dimensions aren't available
-        }
-    };
-
+fn initialize_systems() {
+    initialize_audio_integration();
+    initialize_text_renderer();
     unsafe {
-        // Initialize audio integration if needed
-        if AUDIO_INTEGRATION.is_none() {
-            AUDIO_INTEGRATION = Some(AudioIntegration::new());
-        }
-        
-        if let Some(audio_integration) = AUDIO_INTEGRATION.as_mut() {
-            audio_integration.initialize();
-        }
-        
-        // Initialize sorting visualizers if needed
         if TOP_SORTER.is_none() {
             TOP_SORTER = Some(SortVisualizer::new(SortAlgorithm::Bubble));
         }
@@ -343,479 +66,166 @@ pub fn draw_frame(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset
         if RIGHT_SORTER.is_none() {
             RIGHT_SORTER = Some(SortVisualizer::new(SortAlgorithm::Quick));
         }
-        
-        // Initialize ball positions if they haven't been yet
+    }
+}
+
+fn update_physics(width: u32, height: u32, time: f32, scale_x: f32, scale_y: f32) {
+    unsafe {
         if YELLOW_POS.is_none() {
             let quarter_width = width as f32 / 4.0;
             let quarter_height = height as f32 / 4.0;
-            
-            // Scale ball velocities based on screen size
             let vel_scale = (scale_x + scale_y) / 2.0;
             let base_vel_x = 1.0 * vel_scale;
             let base_vel_y = 0.5 * vel_scale;
-            
-            // Position yellow ball in the upper-left quadrant
             YELLOW_POS = Some((quarter_width * 1.5, quarter_height * 1.5));
             YELLOW_VEL = Some((base_vel_x, base_vel_y));
-            
-            // Position green ball in the lower-right quadrant
             GREEN_POS = Some((width as f32 - quarter_width * 1.5, height as f32 - quarter_height * 1.5));
             GREEN_VEL = Some((-base_vel_x, -base_vel_y));
         }
-        
-        // Update ball positions
+
+        let dt = calculate_delta_time(time);
+        update_ball_position(&mut YELLOW_POS, &mut YELLOW_VEL, width, height, dt, scale_x, scale_y);
+        update_ball_position(&mut GREEN_POS, &mut GREEN_VEL, width, height, dt, scale_x, scale_y);
+        handle_ball_collision();
+    }
+}
+
+fn calculate_delta_time(time: f32) -> f32 {
+    unsafe {
         let dt = if let Some(last) = LAST_TIME {
             let delta = time - last;
-            // Limit delta time to avoid huge jumps if the app freezes
             if delta > 0.1 { 0.1 } else { delta }
         } else {
-            0.016 // ~60 FPS if no previous time
+            0.016
         };
-        
         LAST_TIME = Some(time);
+        dt
+    }
+}
+
+fn update_ball_position(pos: &mut Option<(f32, f32)>, vel: &mut Option<(f32, f32)>, 
+                       width: u32, height: u32, dt: f32, scale_x: f32, scale_y: f32) {
+    if let (Some(pos), Some(vel)) = (pos.as_mut(), vel.as_mut()) {
+        let speed_scale = (scale_x + scale_y) / 2.0;
+        let base_speed = 50.0 * speed_scale;
+        pos.0 += vel.0 * base_speed * dt;
+        pos.1 += vel.1 * base_speed * dt;
         
-        // Update yellow ball position
-        if let (Some(pos), Some(vel)) = (YELLOW_POS.as_mut(), YELLOW_VEL.as_mut()) {
-            // Scale movement speed based on screen size
-            let speed_scale = (scale_x + scale_y) / 2.0;
-            let base_speed = 50.0 * speed_scale;
-            
-            // Update position
-            pos.0 += vel.0 * base_speed * dt;
-            pos.1 += vel.1 * base_speed * dt;
-            
-            // Bounce off walls
-            if pos.0 < 20.0 {
-                pos.0 = 20.0;
-                vel.0 = vel.0.abs();
-            } else if pos.0 > width as f32 - 20.0 {
-                pos.0 = width as f32 - 20.0;
-                vel.0 = -vel.0.abs();
-            }
-            
-            if pos.1 < 20.0 {
-                pos.1 = 20.0;
-                vel.1 = vel.1.abs();
-            } else if pos.1 > height as f32 - 20.0 {
-                pos.1 = height as f32 - 20.0;
-                vel.1 = -vel.1.abs();
-            }
+        if pos.0 < 20.0 {
+            pos.0 = 20.0;
+            vel.0 = vel.0.abs();
+        } else if pos.0 > width as f32 - 20.0 {
+            pos.0 = width as f32 - 20.0;
+            vel.0 = -vel.0.abs();
         }
-        
-        // Update green ball position
-        if let (Some(pos), Some(vel)) = (GREEN_POS.as_mut(), GREEN_VEL.as_mut()) {
-            // Scale movement speed based on screen size
-            let speed_scale = (scale_x + scale_y) / 2.0;
-            let base_speed = 50.0 * speed_scale;
+        if pos.1 < 20.0 {
+            pos.1 = 20.0;
+            vel.1 = vel.1.abs();
+        } else if pos.1 > height as f32 - 20.0 {
+            pos.1 = height as f32 - 20.0;
+            vel.1 = -vel.1.abs();
+        }
+    }
+}
+
+fn handle_ball_collision() {
+    unsafe {
+        if let (Some(yellow_pos), Some(green_pos), Some(green_vel)) = 
+            (YELLOW_POS.as_mut(), GREEN_POS.as_mut(), GREEN_VEL.as_mut()) {
+            let dx = green_pos.0 - yellow_pos.0;
+            let dy = green_pos.1 - yellow_pos.1;
+            let dist_sq = dx * dx + dy * dy;
+            let min_dist = 30.0;
             
-            // Update position
-            pos.0 += vel.0 * base_speed * dt;
-            pos.1 += vel.1 * base_speed * dt;
-            
-            // Bounce off walls
-            if pos.0 < 20.0 {
-                pos.0 = 20.0;
-                vel.0 = vel.0.abs();
-            } else if pos.0 > width as f32 - 20.0 {
-                pos.0 = width as f32 - 20.0;
-                vel.0 = -vel.0.abs();
-            }
-            
-            if pos.1 < 20.0 {
-                pos.1 = 20.0;
-                vel.1 = vel.1.abs();
-            } else if pos.1 > height as f32 - 20.0 {
-                pos.1 = height as f32 - 20.0;
-                vel.1 = -vel.1.abs();
-            }
-            
-            // Ball collision detection with yellow ball
-            if let Some(yellow_pos) = YELLOW_POS {
-                let dx = pos.0 - yellow_pos.0;
-                let dy = pos.1 - yellow_pos.1;
-                let dist_sq = dx * dx + dy * dy;
+            if dist_sq < min_dist * min_dist {
+                let dist = dist_sq.sqrt();
+                let nx = dx / dist;
+                let ny = dy / dist;
+                green_pos.0 = yellow_pos.0 + nx * min_dist;
+                green_pos.1 = yellow_pos.1 + ny * min_dist;
                 
-                // Scale collision distance based on screen size
-                let min_dist = 30.0 * ((scale_x + scale_y) / 2.0);
-                
-                if dist_sq < min_dist * min_dist {
-                    // They're colliding, calculate new velocities
-                    let dist = dist_sq.sqrt();
-                    let nx = dx / dist;
-                    let ny = dy / dist;
-                    
-                    // Move them apart to prevent sticking
-                    pos.0 = yellow_pos.0 + nx * min_dist;
-                    pos.1 = yellow_pos.1 + ny * min_dist;
-                    
-                    if let Some(yellow_vel) = YELLOW_VEL {
-                        // Elastic collision
-                        let dot_prod = vel.0 * nx + vel.1 * ny - yellow_vel.0 * nx - yellow_vel.1 * ny;
-                        
-                        // Update velocities
-                        vel.0 -= dot_prod * nx;
-                        vel.1 -= dot_prod * ny;
-                        
-                        if let Some(yellow_vel_mut) = YELLOW_VEL.as_mut() {
-                            yellow_vel_mut.0 += dot_prod * nx;
-                            yellow_vel_mut.1 += dot_prod * ny;
-                        }
-                    }
+                if let Some(yellow_vel) = YELLOW_VEL.as_mut() {
+                    let dot_prod = green_vel.0 * nx + green_vel.1 * ny - yellow_vel.0 * nx - yellow_vel.1 * ny;
+                    green_vel.0 -= dot_prod * nx;
+                    green_vel.1 -= dot_prod * ny;
+                    yellow_vel.0 += dot_prod * nx;
+                    yellow_vel.1 += dot_prod * ny;
                 }
             }
         }
     }
-    
-    // Clear frame with a dark background
+}
+
+fn clear_frame(frame: &mut [u8]) {
     for pixel in frame.chunks_exact_mut(4) {
-        pixel[0] = 5; // R
-        pixel[1] = 5; // G
-        pixel[2] = 10; // B
-        pixel[3] = 255; // A
+        pixel[0] = 5;
+        pixel[1] = 5;
+        pixel[2] = 10;
+        pixel[3] = 255;
     }
-    
-    // Draw rays for yellow and green light sources
+}
+
+fn draw_balls_and_rays(frame: &mut [u8], width: u32, height: u32, time: f32, 
+                      scale_x: f32, scale_y: f32, x_offset: usize, buffer_width: u32) {
     unsafe {
-        // Draw rays from both light sources
         if let Some(yellow_pos) = YELLOW_POS {
-            let rays_yellow = [255, 255, 150, 255]; // Yellow color
-            draw_rays(
-                frame, width, height,
-                yellow_pos.0 as i32, yellow_pos.1 as i32,
-                width as i32 / 2, height as i32 / 2,
-                width as i32 / 2 - 20, &rays_yellow,
-                RAY_COUNT, time, x_offset, buffer_width
-            );
-            
-            // Draw the yellow light source (scaled to screen size)
-            let yellow_color = [255, 255, 0, 255];
-            let ball_radius = (10.0 * scale_x.max(scale_y)) as i32;
-            draw_filled_circle(
-                frame, width, height,
-                yellow_pos.0 as i32, yellow_pos.1 as i32,
-                ball_radius, &yellow_color,
-                x_offset, buffer_width
-            );
-            
-            // Add glow around the yellow source (scaled to screen size)
-            let glow_radius = (30.0 * scale_x.max(scale_y)) as i32;
-            draw_shadow_glow(
-                frame, width, height,
-                yellow_pos.0 as i32, yellow_pos.1 as i32,
-                glow_radius, &[255, 255, 100, 100],
-                x_offset, buffer_width
-            );
+            draw_ball_with_effects(frame, width, height, yellow_pos, [255, 255, 0, 255], 
+                                 [255, 255, 150, 255], time, scale_x, scale_y, x_offset, buffer_width);
         }
-        
         if let Some(green_pos) = GREEN_POS {
-            let rays_green = [150, 255, 150, 255]; // Green color
-            draw_rays(
-                frame, width, height,
-                green_pos.0 as i32, green_pos.1 as i32,
-                width as i32 / 2, height as i32 / 2,
-                width as i32 / 2 - 20, &rays_green,
-                RAY_COUNT, time + 0.5, x_offset, buffer_width
-            );
-            
-            // Draw the green light source (scaled to screen size)
-            let green_color = [0, 255, 0, 255];
-            let ball_radius = (10.0 * scale_x.max(scale_y)) as i32;
-            draw_filled_circle(
-                frame, width, height,
-                green_pos.0 as i32, green_pos.1 as i32,
-                ball_radius, &green_color,
-                x_offset, buffer_width
-            );
-            
-            // Add glow around the green source (scaled to screen size)
-            let glow_radius = (30.0 * scale_x.max(scale_y)) as i32;
-            draw_shadow_glow(
-                frame, width, height,
-                green_pos.0 as i32, green_pos.1 as i32,
-                glow_radius, &[100, 255, 100, 100],
-                x_offset, buffer_width
-            );
+            draw_ball_with_effects(frame, width, height, green_pos, [0, 255, 0, 255], 
+                                 [150, 255, 150, 255], time + 0.5, scale_x, scale_y, x_offset, buffer_width);
         }
     }
+}
+
+fn draw_ball_with_effects(frame: &mut [u8], width: u32, height: u32, pos: (f32, f32), 
+                         ball_color: [u8; 4], ray_color: [u8; 4], time: f32, 
+                         scale_x: f32, scale_y: f32, x_offset: usize, buffer_width: u32) {
+    draw_rays(frame, width, height, pos.0 as i32, pos.1 as i32, 
+              width as i32 / 2, height as i32 / 2, width as i32 / 2 - 20, 
+              &ray_color, RAY_COUNT, time, x_offset, buffer_width);
+    
+    let ball_radius = (10.0 * scale_x.max(scale_y)) as i32;
+    draw_filled_circle(frame, width, height, pos.0 as i32, pos.1 as i32, 
+                      ball_radius, &ball_color, x_offset, buffer_width);
+    
+    let glow_radius = (30.0 * scale_x.max(scale_y)) as i32;
+    let glow_color = [ball_color[0], ball_color[1], (ball_color[2] as f32 * 0.4) as u8, 100];
+    draw_shadow_glow(frame, width, height, pos.0 as i32, pos.1 as i32, 
+                    glow_radius, &glow_color, x_offset, buffer_width);
+}
+
+fn draw_sorter_visualizations(frame: &mut [u8], width: u32, height: u32, time: f32, 
+                            scale_x: f32, scale_y: f32, x_offset: usize, buffer_width: u32) {
+    let scale_factor = (scale_x + scale_y) / 2.0;
+    let border_thickness = (height as f32 * 0.05 * scale_factor) as usize;
+    let side_width = (width as f32 * 0.05 * scale_factor) as usize;
     
     unsafe {
-        // Update and draw the sorting visualizers along the edges of the screen
-        // Scale the border thickness based on screen dimensions
-        let scale_factor = (scale_x + scale_y) / 2.0;
-        let border_thickness = (height as f32 * 0.05 * scale_factor) as usize; // 5% of height for top/bottom
-        let side_width = (width as f32 * 0.05 * scale_factor) as usize; // 5% of width for sides
-        
-        // Update the sorters
-        if let Some(sorter) = TOP_SORTER.as_mut() {
-            sorter.update();
-            
-            // Restart if completed
-            if sorter.state == SortState::Completed && (time * 10.0).floor() % 10.0 == 0.0 {
-                sorter.restart();
-            }
-            
-            // Draw top sorter
-            sorter.draw(
-                frame, 
-                0, 0, // x, y position 
-                width as usize, border_thickness, // width, height
-                true, // horizontal
-                x_offset, buffer_width
-            );
-        }
-        
-        let sorter_ptr = BOTTOM_SORTER.as_mut().map(|s| s as *mut SortVisualizer);
-        if let Some(sorter_ptr) = sorter_ptr {
-            let sorter = &mut *sorter_ptr;
-            sorter.update();
-
-            // Restart if completed
-            if sorter.state == SortState::Completed && (time * 10.0).floor() % 10.0 == 0.0 {
-                sorter.restart();
-            }
-
-            // Draw bottom sorter
-            sorter.draw(
-                frame,
-                0, height as usize - border_thickness, // x, y position
-                width as usize, border_thickness, // width, height
-                true, // horizontal
-                x_offset, buffer_width
-            );
-        }
-        
-        if let Some(sorter) = LEFT_SORTER.as_mut() {
-            sorter.update();
-            
-            // Restart if completed
-            if sorter.state == SortState::Completed && (time * 10.0).floor() % 10.0 == 0.0 {
-                sorter.restart();
-            }
-            
-            // Draw left sorter
-            sorter.draw(
-                frame,
-                0, border_thickness, // x, y position
-                side_width, height as usize - border_thickness * 2, // width, height
-                false, // vertical
-                x_offset, buffer_width
-            );
-        }
-        
-        if let Some(sorter) = RIGHT_SORTER.as_mut() {
-            sorter.update();
-            
-            // Restart if completed
-            if sorter.state == SortState::Completed && (time * 10.0).floor() % 10.0 == 0.0 {
-                sorter.restart();
-            }
-            
-            // Draw right sorter
-            sorter.draw(
-                frame,
-                width as usize - side_width, border_thickness, // x, y position
-                side_width, height as usize - border_thickness * 2, // width, height
-                false, // vertical
-                x_offset, buffer_width
-            );
-        }
-        
-        // Update and draw the audio visualizer
-        if let Some(audio_integration) = AUDIO_INTEGRATION.as_mut() {
-            let monitor_height = MONITOR_HEIGHT;
-            audio_integration.update(time, monitor_height);
-            audio_integration.draw(frame, width, height, x_offset, buffer_width);
-        }
-        
-        // Update and draw the text renderer
-        if let Some(text_renderer) = TEXT_RENDERER.as_mut() {
-            text_renderer.update(time, width, height);
-            text_renderer.draw(frame, width, height, x_offset, buffer_width);
-        }
+        update_and_draw_sorter(&mut TOP_SORTER, frame, 0, 0, width as usize, border_thickness, 
+                              true, time, x_offset, buffer_width);
+        update_and_draw_sorter(&mut BOTTOM_SORTER, frame, 0, height as usize - border_thickness, 
+                              width as usize, border_thickness, true, time, x_offset, buffer_width);
+        update_and_draw_sorter(&mut LEFT_SORTER, frame, 0, border_thickness, side_width, 
+                              height as usize - border_thickness * 2, false, time, x_offset, buffer_width);
+        update_and_draw_sorter(&mut RIGHT_SORTER, frame, width as usize - side_width, border_thickness, 
+                              side_width, height as usize - border_thickness * 2, false, time, x_offset, buffer_width);
     }
 }
 
-// Draw rays from a source point around a circle
-fn draw_rays(frame: &mut [u8], width: u32, height: u32, 
-            source_x: i32, source_y: i32, 
-            center_x: i32, center_y: i32,
-            radius: i32, color: &[u8; 4], 
-            count: usize, time: f32, 
-            x_offset: usize, buffer_width: u32) {
-    
-    // Get the current position of the other ball to check for shadows
-    let (other_x, other_y, other_radius) = unsafe {
-        if source_x == YELLOW_POS.unwrap_or((0.0, 0.0)).0 as i32 && 
-           source_y == YELLOW_POS.unwrap_or((0.0, 0.0)).1 as i32 {
-            // This is the yellow ball, so get green ball position
-            (GREEN_POS.unwrap_or((0.0, 0.0)).0 as i32, 
-             GREEN_POS.unwrap_or((0.0, 0.0)).1 as i32, 
-             10) // Ball radius
-        } else {
-            // This is the green ball, so get yellow ball position
-            (YELLOW_POS.unwrap_or((0.0, 0.0)).0 as i32, 
-             YELLOW_POS.unwrap_or((0.0, 0.0)).1 as i32, 
-             10) // Ball radius
+fn update_and_draw_sorter(sorter: &mut Option<SortVisualizer>, frame: &mut [u8], 
+                         x: usize, y: usize, width: usize, height: usize, 
+                         horizontal: bool, time: f32, x_offset: usize, buffer_width: u32) {
+    if let Some(sorter) = sorter {
+        sorter.update();
+        if sorter.state == SortState::Completed && (time * 10.0).floor() % 10.0 == 0.0 {
+            sorter.restart();
         }
-    };
-
-    // Store shadow rays for drawing later
-    let mut shadow_rays: Vec<((i32, i32), (i32, i32))> = Vec::new();
-    
-    for i in 0..count {
-        // Calculate angle with small animation
-        let base_angle = (i as f32 / count as f32) * 2.0 * std::f32::consts::PI;
-        let angle = base_angle + (time * 0.2).sin() * 0.05; // Small oscillation
-        
-        // Calculate endpoint on circle
-        let end_x = center_x as f32 + angle.cos() * radius as f32;
-        let end_y = center_y as f32 + angle.sin() * radius as f32;
-        
-        // Check if ray intersects with the other ball
-        // Using ray-circle intersection test
-        let ray_dir_x = end_x as f32 - source_x as f32;
-        let ray_dir_y = end_y as f32 - source_y as f32;
-        let ray_length = (ray_dir_x * ray_dir_x + ray_dir_y * ray_dir_y).sqrt();
-        
-        // Normalize ray direction
-        let ray_dir_x = ray_dir_x / ray_length;
-        let ray_dir_y = ray_dir_y / ray_length;
-        
-        // Vector from ray origin to circle center
-        let oc_x = source_x as f32 - other_x as f32;
-        let oc_y = source_y as f32 - other_y as f32;
-        
-        // Quadratic formula components
-        let a = 1.0; // Since ray direction is normalized
-        let b = 2.0 * (ray_dir_x * oc_x + ray_dir_y * oc_y);
-        let c = (oc_x * oc_x + oc_y * oc_y) - (other_radius * other_radius) as f32;
-        
-        let discriminant = b * b - 4.0 * a * c;
-        
-        if discriminant >= 0.0 {
-            // Ray intersects the sphere
-            let t1 = (-b - discriminant.sqrt()) / (2.0 * a);
-            let t2 = (-b + discriminant.sqrt()) / (2.0 * a);
-            
-            // Check if intersection is along the ray (not behind it)
-            if (t1 > 0.0 && t1 < ray_length) || (t2 > 0.0 && t2 < ray_length) {
-                // Calculate intersection point (using the first intersection)
-                let t = t1.max(0.0);
-                let intersect_x = (source_x as f32 + ray_dir_x * t) as i32;
-                let intersect_y = (source_y as f32 + ray_dir_y * t) as i32;
-                
-                // Draw ray only up to the intersection point
-                draw_line(frame, width, height, source_x, source_y, intersect_x, intersect_y, 
-                         color, x_offset, buffer_width);
-                
-                // Calculate shadow ray - extends from the intersection point to beyond the circle
-                // Make the shadow ray extend to the edge of the main circle
-                let shadow_length = radius as f32 * 1.2; // Longer than the circle radius
-                let shadow_end_x = (intersect_x as f32 + ray_dir_x * shadow_length) as i32;
-                let shadow_end_y = (intersect_y as f32 + ray_dir_y * shadow_length) as i32;
-                
-                // Store shadow ray for later drawing
-                shadow_rays.push(((intersect_x, intersect_y), (shadow_end_x, shadow_end_y)));
-            } else {
-                // No intersection, draw full ray
-                draw_line(frame, width, height, source_x, source_y, end_x as i32, end_y as i32, 
-                         color, x_offset, buffer_width);
-            }
-        } else {
-            // No intersection, draw full ray
-            draw_line(frame, width, height, source_x, source_y, end_x as i32, end_y as i32, 
-                     color, x_offset, buffer_width);
-        }
-    }
-    
-    // Draw shadow rays with faded color
-    let shadow_color = [
-        (color[0] as f32 * 0.2) as u8,
-        (color[1] as f32 * 0.2) as u8,
-        (color[2] as f32 * 0.2) as u8,
-        128, // Semi-transparent
-    ];
-    
-    for shadow in shadow_rays {
-        draw_line(frame, width, height, 
-                 shadow.0.0, shadow.0.1, 
-                 shadow.1.0, shadow.1.1, 
-                 &shadow_color, x_offset, buffer_width);
+        sorter.draw(frame, x, y, width, height, horizontal, x_offset, buffer_width as u32);
     }
 }
 
-// Draw a filled circle
-fn draw_filled_circle(frame: &mut [u8], width: u32, height: u32, 
-                     center_x: i32, center_y: i32, 
-                     radius: i32, color: &[u8; 4],
-                     x_offset: usize, buffer_width: u32) {
-    
-    for y in -radius..=radius {
-        let h = (radius.pow(2) - y.pow(2)) as f32;
-        if h < 0.0 { continue; }
-
-        let w = h.sqrt() as i32;
-        for x in -w..=w {
-            put_pixel(frame, width, height, center_x + x, center_y + y, color, x_offset, buffer_width);
-        }
-    }
-}
-
-// Draw a line using Bresenham's algorithm
-fn draw_line(frame: &mut [u8], width: u32, height: u32, 
-            x0: i32, y0: i32, 
-            x1: i32, y1: i32, 
-            color: &[u8; 4],
-            x_offset: usize, buffer_width: u32) {
-    
-    let mut x0 = x0;
-    let mut y0 = y0;
-    let dx = (x1 - x0).abs();
-    let dy = -(y1 - y0).abs();
-    let sx = if x0 < x1 { 1 } else { -1 };
-    let sy = if y0 < y1 { 1 } else { -1 };
-    let mut err = dx + dy;
-    
-    loop {
-        put_pixel(frame, width, height, x0, y0, color, x_offset, buffer_width);
-        
-        if x0 == x1 && y0 == y1 { break; }
-        
-        let e2 = 2 * err;
-        if e2 >= dy {
-            if x0 == x1 { break; }
-            err += dy;
-            x0 += sx;
-        }
-        if e2 <= dx {
-            if y0 == y1 { break; }
-            err += dx;
-            y0 += sy;
-        }
-    }
-}
-
-// Helper to put a pixel in the frame buffer
-fn put_pixel(frame: &mut [u8], width: u32, height: u32, x: i32, y: i32, color: &[u8; 4], 
-            x_offset: usize, buffer_width: u32) {
-    if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
-        return;
-    }
-    
-    // Calculate the index in the buffer with the x_offset
-    let x_pos = x as usize + x_offset;
-    let idx = ((y as u32 * buffer_width + x_pos as u32) * 4) as usize;
-    
-    if idx + 3 < frame.len() {
-        // Apply alpha blending
-        frame[idx] = (frame[idx] as u16 * (255 - color[3]) as u16 / 255 + color[0] as u16 * color[3] as u16 / 255) as u8;
-        frame[idx + 1] = (frame[idx + 1] as u16 * (255 - color[3]) as u16 / 255 + color[1] as u16 * color[3] as u16 / 255) as u8;
-        frame[idx + 2] = (frame[idx + 2] as u16 * (255 - color[3]) as u16 / 255 + color[2] as u16 * color[3] as u16 / 255) as u8;
-        frame[idx + 3] = 255;
-    }
-}
-
-// Public functions to apply forces to the balls
 pub fn apply_force_yellow(force_x: f32, force_y: f32) {
     unsafe {
         if let Some(vel) = YELLOW_VEL {
@@ -832,78 +242,14 @@ pub fn apply_force_green(force_x: f32, force_y: f32) {
     }
 }
 
-pub fn teleport_yellow(x: f32, y: f32) { unsafe { YELLOW_POS = Some((x, y)); } }
-pub fn teleport_green(x: f32, y: f32) { unsafe { GREEN_POS = Some((x, y)); } }
-
-// Draw a shadow glow effect
-fn draw_shadow_glow(frame: &mut [u8], width: u32, height: u32,
-                   center_x: i32, center_y: i32,
-                   radius: i32, color: &[u8; 4],
-                   x_offset: usize, buffer_width: u32) {
-    let radius_sq = radius * radius;
-    let inner_radius_sq = (radius - 5).max(0) * (radius - 5).max(0); // Soft inner edge
-    
-    // Define the bounding box of the glow
-    let x_min = (center_x - radius).max(0);
-    let x_max = (center_x + radius).min(width as i32 - 1);
-    let y_min = (center_y - radius).max(0);
-    let y_max = (center_y + radius).min(height as i32 - 1);
-    
-    for y in y_min..=y_max {
-        for x in x_min..=x_max {
-            let dx = x - center_x;
-            let dy = y - center_y;
-            let dist_sq = dx * dx + dy * dy;
-
-            if dist_sq < radius_sq {
-                // Calculate intensity based on distance from center
-                let intensity = if dist_sq > inner_radius_sq {
-                    // Fade out from inner to outer radius
-                    1.0 - (dist_sq as f32 - inner_radius_sq as f32) / (radius_sq as f32 - inner_radius_sq as f32)
-                } else {
-                    1.0
-                };
-                
-                // Mix with a darker version for shadow effect
-                let shadow_color = [
-                    (color[0] as f32 * 0.5) as u8,
-                    (color[1] as f32 * 0.5) as u8,
-                    (color[2] as f32 * 0.5) as u8,
-                    (color[3] as f32 * intensity) as u8
-                ];
-                
-                // Blend with existing pixels for a softer glow
-                let idx = 4 * (y as usize * buffer_width as usize + (x as usize + x_offset));
-                if idx + 3 < frame.len() {
-                    let existing_r = frame[idx];
-                    let existing_g = frame[idx + 1];
-                    let existing_b = frame[idx + 2];
-                    
-                    frame[idx] = existing_r.saturating_add(shadow_color[0]);
-                    frame[idx + 1] = existing_g.saturating_add(shadow_color[1]);
-                    frame[idx + 2] = existing_b.saturating_add(shadow_color[2]);
-                    frame[idx + 3] = 255;
-                }
-            }
-        }
-    }
+pub fn teleport_yellow(x: f32, y: f32) { 
+    unsafe { YELLOW_POS = Some((x, y)); } 
 }
 
-fn put_pixel_safe(frame: &mut [u8], x: i32, y: i32, buffer_width: u32, height: u32, color: [u8; 4], x_offset: usize) {
-    if x < 0 || y < 0 || (x_offset + x as usize) >= buffer_width as usize || y >= height as i32 {
-        return;
-    }
-    let idx = 4 * (y as usize * buffer_width as usize + x_offset + x as usize);
-    if idx + 3 < frame.len() {
-        let alpha = color[3] as f32 / 255.0;
-        frame[idx] = (frame[idx] as f32 * (1.0 - alpha) + color[0] as f32 * alpha) as u8;
-        frame[idx + 1] = (frame[idx + 1] as f32 * (1.0 - alpha) + color[1] as f32 * alpha) as u8;
-        frame[idx + 2] = (frame[idx + 2] as f32 * (1.0 - alpha) + color[2] as f32 * alpha) as u8;
-        frame[idx + 3] = 255;
-    }
+pub fn teleport_green(x: f32, y: f32) { 
+    unsafe { GREEN_POS = Some((x, y)); } 
 }
 
-// Public function to restart all sorting visualizers
 pub fn restart_sorters() {
     unsafe {
         if let Some(sorter) = TOP_SORTER.as_mut() {
@@ -918,5 +264,76 @@ pub fn restart_sorters() {
         if let Some(sorter) = RIGHT_SORTER.as_mut() {
             sorter.restart();
         }
+    }
+}
+
+fn draw_rays(frame: &mut [u8], width: u32, height: u32, 
+            source_x: i32, source_y: i32, 
+            center_x: i32, center_y: i32,
+            radius: i32, color: &[u8; 4], 
+            count: usize, time: f32, 
+            x_offset: usize, buffer_width: u32) {
+    let (other_x, other_y, other_radius) = unsafe {
+        if source_x == YELLOW_POS.unwrap_or((0.0, 0.0)).0 as i32 && 
+           source_y == YELLOW_POS.unwrap_or((0.0, 0.0)).1 as i32 {
+            (GREEN_POS.unwrap_or((0.0, 0.0)).0 as i32, 
+             GREEN_POS.unwrap_or((0.0, 0.0)).1 as i32, 
+             10)
+        } else {
+            (YELLOW_POS.unwrap_or((0.0, 0.0)).0 as i32, 
+             YELLOW_POS.unwrap_or((0.0, 0.0)).1 as i32, 
+             10)
+        }
+    };
+    let mut shadow_rays: Vec<((i32, i32), (i32, i32))> = Vec::new();
+    for i in 0..count {
+        let base_angle = (i as f32 / count as f32) * 2.0 * std::f32::consts::PI;
+        let angle = base_angle + (time * 0.2).sin() * 0.05;
+        let end_x = center_x as f32 + angle.cos() * radius as f32;
+        let end_y = center_y as f32 + angle.sin() * radius as f32;
+        let ray_dir_x = end_x as f32 - source_x as f32;
+        let ray_dir_y = end_y as f32 - source_y as f32;
+        let ray_length = (ray_dir_x * ray_dir_x + ray_dir_y * ray_dir_y).sqrt();
+        let ray_dir_x = ray_dir_x / ray_length;
+        let ray_dir_y = ray_dir_y / ray_length;
+        let oc_x = source_x as f32 - other_x as f32;
+        let oc_y = source_y as f32 - other_y as f32;
+        let a = 1.0;
+        let b = 2.0 * (ray_dir_x * oc_x + ray_dir_y * oc_y);
+        let c = (oc_x * oc_x + oc_y * oc_y) - (other_radius * other_radius) as f32;
+        let discriminant = b * b - 4.0 * a * c;
+        if discriminant >= 0.0 {
+            let t1 = (-b - discriminant.sqrt()) / (2.0 * a);
+            let t2 = (-b + discriminant.sqrt()) / (2.0 * a);
+            if (t1 > 0.0 && t1 < ray_length) || (t2 > 0.0 && t2 < ray_length) {
+                let t = t1.max(0.0);
+                let intersect_x = (source_x as f32 + ray_dir_x * t) as i32;
+                let intersect_y = (source_y as f32 + ray_dir_y * t) as i32;
+                draw_line(frame, width, height, source_x, source_y, intersect_x, intersect_y, 
+                         color, x_offset, buffer_width);
+                let shadow_length = radius as f32 * 1.2;
+                let shadow_end_x = (intersect_x as f32 + ray_dir_x * shadow_length) as i32;
+                let shadow_end_y = (intersect_y as f32 + ray_dir_y * shadow_length) as i32;
+                shadow_rays.push(((intersect_x, intersect_y), (shadow_end_x, shadow_end_y)));
+            } else {
+                draw_line(frame, width, height, source_x, source_y, end_x as i32, end_y as i32, 
+                         color, x_offset, buffer_width);
+            }
+        } else {
+            draw_line(frame, width, height, source_x, source_y, end_x as i32, end_y as i32, 
+                     color, x_offset, buffer_width);
+        }
+    }
+    let shadow_color = [
+        (color[0] as f32 * 0.2) as u8,
+        (color[1] as f32 * 0.2) as u8,
+        (color[2] as f32 * 0.2) as u8,
+        128,
+    ];
+    for shadow in shadow_rays {
+        draw_line(frame, width, height, 
+                 shadow.0.0, shadow.0.1, 
+                 shadow.1.0, shadow.1.1, 
+                 &shadow_color, x_offset, buffer_width);
     }
 }

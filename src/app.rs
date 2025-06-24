@@ -1,6 +1,9 @@
-use stimstation::types::{ActiveSide, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT};
-use stimstation::{FpsCounter, Buffers, World};
-use stimstation::{menu::Menu, visualizations, text_rendering};
+use stimstation::types::{ActiveSide, WIDTH, HEIGHT, ORIGINAL_WIDTH, ORIGINAL_HEIGHT, Buffers};
+use stimstation::FpsCounter;
+use stimstation::types::World;
+use stimstation::menu::Menu;
+use stimstation::visualizations;
+use stimstation::text_rendering;
 
 use winit::{
     event::MouseButton,
@@ -9,7 +12,7 @@ use winit::{
 };
 use winit_input_helper::WinitInputHelper;
 
-use glam::{vec2, Vec2};
+use glam::vec2;
 
 use std::time::Instant;
 
@@ -32,7 +35,7 @@ impl App {
         let world = World::new();
 
         if let Some(monitor) = window.primary_monitor() {
-            stimstation::viz::ray_pattern::set_monitor_dimensions(&monitor);
+            stimstation::ray_pattern::set_monitor_dimensions(&monitor);
         }
 
         Self {
@@ -86,7 +89,7 @@ impl App {
             });
 
             if let Some(monitor) = window.primary_monitor() {
-                stimstation::viz::ray_pattern::set_monitor_dimensions(&monitor);
+                stimstation::ray_pattern::set_monitor_dimensions(&monitor);
             }
         }
 
@@ -97,7 +100,7 @@ impl App {
                 // Only interact inside the original‑visualisation quadrant
                 let scale_x = ORIGINAL_WIDTH as f32 / (win.width as f32 / 2.0);
                 let scale_y = ORIGINAL_HEIGHT as f32 / win.height as f32;
-                self.world.set_mouse_pos(vec2(mouse_pos.0 * scale_x, mouse_pos.1 * scale_y), elapsed);
+                self.world.set_mouse_pos(vec2(mouse_pos.0 * scale_x, mouse_pos.1 * scale_y));
             } else {
                 self.world.mouse_pos = None;
             }
@@ -159,7 +162,7 @@ impl App {
     /// Advances simulation state once per frame
     pub fn update(&mut self) {
         let elapsed = self.start_time.elapsed().as_secs_f32();
-        self.world.update(elapsed);
+        self.world.update();
         self.menu.update(self.start_time.elapsed().as_secs_f32());
         self.fps_counter.update();
     }
@@ -182,7 +185,7 @@ impl App {
             ActiveSide::Original => visualizations::draw_original_with_buffer(frame, &self.world, &mut self.buffers.original),
             ActiveSide::Circular => visualizations::draw_circular_with_buffer(frame, elapsed, &mut self.buffers.circular),
             ActiveSide::Full => visualizations::draw_full_screen_with_buffer(frame, &self.world, elapsed, &mut self.buffers),
-            ActiveSide::RayPattern => stimstation::viz::ray_pattern::draw_frame(frame, WIDTH, HEIGHT, elapsed, 0, WIDTH),
+            ActiveSide::RayPattern => stimstation::ray_pattern::draw_frame(frame, WIDTH, HEIGHT, elapsed, 0, WIDTH),
             ActiveSide::Pythagoras => visualizations::draw_pythagoras_frame(frame, elapsed),
             ActiveSide::FibonacciSpiral => visualizations::draw_fibonacci_frame(frame, elapsed),
             ActiveSide::SimpleProof => visualizations::draw_simple_proof_frame(frame, elapsed),

@@ -445,7 +445,6 @@ pub fn draw_full_screen_with_buffer(frame: &mut [u8], world: &crate::types::Worl
     // Clear frame
     frame.fill(0);
     
-    // Draw world to left half
     let width = crate::types::WIDTH as usize;
     let height = crate::types::HEIGHT as usize;
     let half_width = width / 2;
@@ -454,13 +453,20 @@ pub fn draw_full_screen_with_buffer(frame: &mut [u8], world: &crate::types::Worl
     buffers.original.fill(0);
     world.draw(&mut buffers.original);
     
-    // Copy left half
+    // Copy left half - scale from ORIGINAL_WIDTH to half of main width
     for y in 0..height {
         for x in 0..half_width {
-            let src_idx = 4 * (y * (crate::types::ORIGINAL_WIDTH as usize) + x);
+            // Scale coordinates from main frame to original buffer
+            let src_x = (x as f32 * crate::types::ORIGINAL_WIDTH as f32 / half_width as f32) as usize;
+            let src_y = (y as f32 * crate::types::ORIGINAL_HEIGHT as f32 / height as f32) as usize;
+            
+            let src_idx = 4 * (src_y * crate::types::ORIGINAL_WIDTH as usize + src_x);
             let dst_idx = 4 * (y * width + x);
             
-            if src_idx + 3 < buffers.original.len() && dst_idx + 3 < frame.len() {
+            if src_x < crate::types::ORIGINAL_WIDTH as usize && 
+               src_y < crate::types::ORIGINAL_HEIGHT as usize &&
+               src_idx + 3 < buffers.original.len() && 
+               dst_idx + 3 < frame.len() {
                 frame[dst_idx..dst_idx + 4].copy_from_slice(&buffers.original[src_idx..src_idx + 4]);
             }
         }
@@ -470,13 +476,20 @@ pub fn draw_full_screen_with_buffer(frame: &mut [u8], world: &crate::types::Worl
     buffers.circular.fill(0);
     crate::mesmerise_circular::draw_frame(&mut buffers.circular, elapsed);
     
-    // Copy right half
+    // Copy right half - scale from mesmerise_circular dimensions to half of main width
     for y in 0..height {
         for x in 0..half_width {
-            let src_idx = 4 * (y * (crate::mesmerise_circular::WIDTH as usize) + x);
+            // Scale coordinates from main frame to circular buffer
+            let src_x = (x as f32 * crate::mesmerise_circular::WIDTH as f32 / half_width as f32) as usize;
+            let src_y = (y as f32 * crate::mesmerise_circular::HEIGHT as f32 / height as f32) as usize;
+            
+            let src_idx = 4 * (src_y * crate::mesmerise_circular::WIDTH as usize + src_x);
             let dst_idx = 4 * (y * width + (half_width + x));
             
-            if src_idx + 3 < buffers.circular.len() && dst_idx + 3 < frame.len() {
+            if src_x < crate::mesmerise_circular::WIDTH as usize && 
+               src_y < crate::mesmerise_circular::HEIGHT as usize &&
+               src_idx + 3 < buffers.circular.len() && 
+               dst_idx + 3 < frame.len() {
                 frame[dst_idx..dst_idx + 4].copy_from_slice(&buffers.circular[src_idx..src_idx + 4]);
             }
         }

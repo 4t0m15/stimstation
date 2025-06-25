@@ -1,4 +1,4 @@
-use crate::algorithms::sorter::{SortVisualizer, SortAlgorithm, SortState, initialize_algorithm_stats, get_leading_algorithm};
+use crate::algorithms::sorter::{SortVisualizer, SortAlgorithm, SortState, initialize_algorithm_stats};
 
 static mut TOP_SORTER: Option<SortVisualizer> = None;
 static mut BOTTOM_SORTER: Option<SortVisualizer> = None;
@@ -9,16 +9,16 @@ pub fn initialize_sorters() {
     initialize_algorithm_stats();
     unsafe {
         if TOP_SORTER.is_none() {
-            TOP_SORTER = Some(SortVisualizer::new(SortAlgorithm::Bubble));
+            TOP_SORTER = Some(SortVisualizer::new(SortAlgorithm::Merge));
         }
         if BOTTOM_SORTER.is_none() {
-            BOTTOM_SORTER = Some(SortVisualizer::new(SortAlgorithm::Quick));
+            BOTTOM_SORTER = Some(SortVisualizer::new(SortAlgorithm::Insertion));
         }
         if LEFT_SORTER.is_none() {
-            LEFT_SORTER = Some(SortVisualizer::new(SortAlgorithm::Bogo));
+            LEFT_SORTER = Some(SortVisualizer::new(SortAlgorithm::Selection));
         }
         if RIGHT_SORTER.is_none() {
-            RIGHT_SORTER = Some(SortVisualizer::new(SortAlgorithm::Quick));
+            RIGHT_SORTER = Some(SortVisualizer::new(SortAlgorithm::Shell));
         }
     }
 }
@@ -31,25 +31,26 @@ pub fn draw_sorter_visualizations(frame: &mut [u8], width: u32, height: u32, tim
     
     unsafe {
         update_and_draw_sorter(&mut TOP_SORTER, frame, 0, 0, width as usize, border_thickness, 
-                              true, time, x_offset, buffer_width);
+                              true, time, x_offset, buffer_width, false, true);  // flip_vertical = true for top
         update_and_draw_sorter(&mut BOTTOM_SORTER, frame, 0, height as usize - border_thickness, 
-                              width as usize, border_thickness, true, time, x_offset, buffer_width);
+                              width as usize, border_thickness, true, time, x_offset, buffer_width, false, false);  // no flip for bottom
         update_and_draw_sorter(&mut LEFT_SORTER, frame, 0, border_thickness, side_width, 
-                              height as usize - border_thickness * 2, false, time, x_offset, buffer_width);
+                              height as usize - border_thickness * 2, false, time, x_offset, buffer_width, true, false);  // flip_horizontal = true for left
         update_and_draw_sorter(&mut RIGHT_SORTER, frame, width as usize - side_width, border_thickness, 
-                              side_width, height as usize - border_thickness * 2, false, time, x_offset, buffer_width);
+                              side_width, height as usize - border_thickness * 2, false, time, x_offset, buffer_width, false, false);  // no flip for right
     }
 }
 
 fn update_and_draw_sorter(sorter: &mut Option<SortVisualizer>, frame: &mut [u8], 
                          x: usize, y: usize, width: usize, height: usize, 
-                         horizontal: bool, time: f32, x_offset: usize, buffer_width: u32) {
+                         horizontal: bool, time: f32, x_offset: usize, buffer_width: u32,
+                         flip_horizontal: bool, flip_vertical: bool) {
     if let Some(sorter) = sorter {
         sorter.update();
         if sorter.state == SortState::Completed && (time * 10.0).floor() % 10.0 == 0.0 {
             sorter.restart();
         }
-        sorter.draw(frame, x, y, width, height, horizontal, x_offset, buffer_width as u32);
+        sorter.draw_with_direction(frame, x, y, width, height, horizontal, x_offset, buffer_width as u32, flip_horizontal, flip_vertical);
     }
 }
 
@@ -70,10 +71,76 @@ pub fn restart_sorters() {
     }
 }
 
-pub fn draw_algorithm_stats(frame: &mut [u8], width: u32, height: u32, x_offset: usize, buffer_width: u32) {
-    if let Some((algorithm, count)) = get_leading_algorithm() {
-        let text = format!("({}) - {}", count, algorithm.name());
-        draw_stats_text(frame, &text, 20, 20, [255, 255, 255, 255], width, x_offset, buffer_width);
+pub fn draw_algorithm_stats(frame: &mut [u8], width: u32, _height: u32, x_offset: usize, buffer_width: u32) {
+    use crate::algorithms::sorter::get_algorithm_stats;
+    
+    if let Some(stats_arc) = get_algorithm_stats() {
+        if let Ok(stats_map) = stats_arc.lock() {
+            let mut stats_lines = Vec::new();
+            
+            // Collect all algorithm stats
+            for (algorithm, count) in stats_map.iter() {
+                stats_lines.push(format!("{}: {}", algorithm.name(), count));
+            }
+            
+            // Sort by count (descending)
+            stats_lines.sort_by(|a, b| {
+                let a_count: u32 = a.split(": ").nth(1).unwrap_or("0").parse().unwrap_or(0);
+                let b_count: u32 = b.split(": ").nth(1).unwrap_or("0").parse().unwrap_or(0);
+                b_count.cmp(&a_count)
+            });
+            
+            // Position the stats in the top-left, away from the top border sorter
+            let stats_x = 10u32;
+            let mut stats_y = 10u32;
+            let char_width = 8u32;
+            let char_height = 12u32;
+            let line_spacing = 2u32;
+            let padding = 4u32;
+            
+            // Calculate max text width
+            let max_text_width = stats_lines.iter()
+                .map(|line| line.len() as u32 * char_width)
+                .max()
+                .unwrap_or(0);
+            
+            let total_height = stats_lines.len() as u32 * (char_height + line_spacing) - line_spacing;
+            
+            // Draw semi-transparent dark background
+            draw_background_rect(frame, stats_x - padding, stats_y - padding, 
+                               max_text_width + padding * 2, total_height + padding * 2, 
+                               [0, 0, 0, 180], width, x_offset, buffer_width);
+            
+            // Draw each line of text
+            for line in stats_lines {
+                draw_stats_text(frame, &line, stats_x, stats_y, [255, 255, 255, 255], width, x_offset, buffer_width);
+                stats_y += char_height + line_spacing;
+            }
+        }
+    }
+}
+
+fn draw_background_rect(frame: &mut [u8], x: u32, y: u32, width: u32, height: u32, 
+                       color: [u8; 4], frame_width: u32, x_offset: usize, buffer_width: u32) {
+    for dy in 0..height {
+        for dx in 0..width {
+            let px = x + dx;
+            let py = y + dy;
+            
+            if px < frame_width && py < frame.len() as u32 / 4 / buffer_width {
+                let index = (((py * buffer_width + px + x_offset as u32) * 4) as usize).min(frame.len() - 4);
+                if index + 3 < frame.len() {
+                    // Alpha blend the background
+                    let alpha = color[3] as f32 / 255.0;
+                    let inv_alpha = 1.0 - alpha;
+                    
+                    frame[index] = (frame[index] as f32 * inv_alpha + color[0] as f32 * alpha) as u8;
+                    frame[index + 1] = (frame[index + 1] as f32 * inv_alpha + color[1] as f32 * alpha) as u8;
+                    frame[index + 2] = (frame[index + 2] as f32 * inv_alpha + color[2] as f32 * alpha) as u8;
+                    frame[index + 3] = 255;
+                }
+            }
+        }
     }
 }
 
@@ -89,7 +156,7 @@ fn draw_stats_text(frame: &mut [u8], text: &str, x: u32, y: u32, color: [u8; 4],
 }
 
 fn draw_char(frame: &mut [u8], ch: char, x: u32, y: u32, color: [u8; 4], 
-             frame_width: u32, char_width: u32, _char_height: u32, x_offset: usize, buffer_width: u32) {
+             frame_width: u32, char_width: u32, char_height: u32, x_offset: usize, buffer_width: u32) {
     // Simple bitmap font for basic characters
     let pattern = get_char_pattern(ch);
 
@@ -98,7 +165,9 @@ fn draw_char(frame: &mut [u8], ch: char, x: u32, y: u32, color: [u8; 4],
             let px = x + (i as u32 % char_width);
             let py = y + (i as u32 / char_width);
             
-            if px < frame_width && py < frame.len() as u32 / 4 / buffer_width {
+            // Fixed bounds checking - calculate proper frame height
+            let frame_height = frame.len() as u32 / 4 / buffer_width;
+            if px < frame_width && py < frame_height {
                 let index = (((py * buffer_width + px + x_offset as u32) * 4) as usize).min(frame.len() - 4);
                 if index + 3 < frame.len() {
                     frame[index] = color[0];
@@ -324,20 +393,6 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             1,1,0,0,0,0,0,0,
             1,1,1,1,1,1,1,1,
         ],
-        'F' => vec![
-            1,1,1,1,1,1,1,1,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,1,1,1,1,0,0,
-            1,1,1,1,1,1,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-        ],
         'G' => vec![
             0,1,1,1,1,1,1,0,
             1,1,0,0,0,0,1,1,
@@ -352,20 +407,6 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             1,1,0,0,0,0,1,1,
             0,1,1,1,1,1,1,0,
         ],
-        'H' => vec![
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,1,1,1,1,1,1,
-            1,1,1,1,1,1,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-        ],
         'I' => vec![
             1,1,1,1,1,1,1,1,
             0,0,0,1,1,0,0,0,
@@ -379,20 +420,6 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             0,0,0,1,1,0,0,0,
             0,0,0,1,1,0,0,0,
             1,1,1,1,1,1,1,1,
-        ],
-        'J' => vec![
-            0,0,0,0,1,1,1,1,
-            0,0,0,0,0,1,1,0,
-            0,0,0,0,0,1,1,0,
-            0,0,0,0,0,1,1,0,
-            0,0,0,0,0,1,1,0,
-            0,0,0,0,0,1,1,0,
-            0,0,0,0,0,1,1,0,
-            0,0,0,0,0,1,1,0,
-            1,1,0,0,0,1,1,0,
-            1,1,0,0,0,1,1,0,
-            1,1,0,0,0,1,1,0,
-            0,1,1,1,1,1,0,0,
         ],
         'K' => vec![
             1,1,0,0,0,0,1,1,
@@ -464,20 +491,6 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             1,1,0,0,0,0,1,1,
             0,1,1,1,1,1,1,0,
         ],
-        'P' => vec![
-            1,1,1,1,1,1,1,0,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,1,1,1,1,1,0,
-            1,1,1,1,1,1,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-        ],
         'Q' => vec![
             0,1,1,1,1,1,1,0,
             1,1,0,0,0,0,1,1,
@@ -548,6 +561,76 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             1,1,0,0,0,0,1,1,
             0,1,1,1,1,1,1,0,
         ],
+        ':' => vec![
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+        ],
+        'F' => vec![
+            1,1,1,1,1,1,1,1,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,1,1,1,1,0,0,
+            1,1,1,1,1,1,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+        ],
+        'H' => vec![
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,1,1,1,1,1,1,
+            1,1,1,1,1,1,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+        ],
+        'J' => vec![
+            0,0,0,0,0,0,1,1,
+            0,0,0,0,0,0,1,1,
+            0,0,0,0,0,0,1,1,
+            0,0,0,0,0,0,1,1,
+            0,0,0,0,0,0,1,1,
+            0,0,0,0,0,0,1,1,
+            0,0,0,0,0,0,1,1,
+            0,0,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            0,1,1,1,1,1,1,0,
+        ],
+        'P' => vec![
+            1,1,1,1,1,1,1,0,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,1,1,1,1,1,0,
+            1,1,1,1,1,1,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+        ],
         'V' => vec![
             1,1,0,0,0,0,1,1,
             1,1,0,0,0,0,1,1,
@@ -555,7 +638,7 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             1,1,0,0,0,0,1,1,
             1,1,0,0,0,0,1,1,
             1,1,0,0,0,0,1,1,
-            0,1,1,0,0,1,1,0,
+            1,1,0,0,0,0,1,1,
             0,1,1,0,0,1,1,0,
             0,1,1,0,0,1,1,0,
             0,0,1,1,1,1,0,0,
@@ -568,9 +651,9 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             1,1,0,0,0,0,1,1,
             1,1,0,0,0,0,1,1,
             1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
             1,1,0,1,1,0,1,1,
             1,1,0,1,1,0,1,1,
+            1,1,1,1,1,1,1,1,
             1,1,1,1,1,1,1,1,
             1,1,1,0,0,1,1,1,
             1,1,0,0,0,0,1,1,

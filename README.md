@@ -1,4 +1,4 @@
-# StimStation – Ray Pattern
+# Read ME, not ANYONE else
 
 **StimStation** is a **_VERY_ cool** visualizer written in Rust inspired by the visuals in short form "sludge" content
  

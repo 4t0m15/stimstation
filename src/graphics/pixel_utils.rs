@@ -23,6 +23,43 @@ pub fn blend_pixel_safe(frame: &mut [u8], x: i32, y: i32, width: u32, height: u3
         }
     }
 }
+
+pub fn draw_rectangle_safe(
+    frame: &mut [u8],
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    color: [u8; 4],
+    buffer_width: u32,
+    buffer_height: u32,
+) {
+    let x_start = x.max(0) as u32;
+    let y_start = y.max(0) as u32;
+    let x_end = (x + width as i32).min(buffer_width as i32) as u32;
+    let y_end = (y + height as i32).min(buffer_height as i32) as u32;
+
+    let alpha = color[3] as f32 / 255.0;
+    let src_r = color[0] as f32;
+    let src_g = color[1] as f32;
+    let src_b = color[2] as f32;
+
+    for py in y_start..y_end {
+        for px in x_start..x_end {
+            let idx = 4 * (py as usize * buffer_width as usize + px as usize);
+            if idx + 3 < frame.len() {
+                let dst_r = frame[idx] as f32;
+                let dst_g = frame[idx + 1] as f32;
+                let dst_b = frame[idx + 2] as f32;
+
+                frame[idx] = ((src_r * alpha) + (dst_r * (1.0 - alpha))) as u8;
+                frame[idx + 1] = ((src_g * alpha) + (dst_g * (1.0 - alpha))) as u8;
+                frame[idx + 2] = ((src_b * alpha) + (dst_b * (1.0 - alpha))) as u8;
+            }
+        }
+    }
+}
+
 pub fn draw_line(frame: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4], width: i32) {
     let dx = (x1 - x0).abs();
     let dy = (y1 - y0).abs();

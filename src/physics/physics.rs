@@ -1,3 +1,6 @@
+#![allow(unsafe_op_in_unsafe_fn)]
+#![allow(static_mut_refs)]
+
 use crate::graphics::render::draw_filled_circle;
 use crate::audio::audio_handler::get_audio_spectrum;
 
@@ -61,16 +64,20 @@ fn update_ball_position(pos: &mut Option<(f32, f32)>, vel: &mut Option<(f32, f32
         if pos.0 < 20.0 {
             pos.0 = 20.0;
             vel.0 = vel.0.abs();
+            crate::physics::detect_corner::increment_corner_hit(pos.0, pos.1, width, height);
         } else if pos.0 > width as f32 - 20.0 {
             pos.0 = width as f32 - 20.0;
             vel.0 = -vel.0.abs();
+            crate::physics::detect_corner::increment_corner_hit(pos.0, pos.1, width, height);
         }
         if pos.1 < 20.0 {
             pos.1 = 20.0;
             vel.1 = vel.1.abs();
+            crate::physics::detect_corner::increment_corner_hit(pos.0, pos.1, width, height);
         } else if pos.1 > height as f32 - 20.0 {
             pos.1 = height as f32 - 20.0;
             vel.1 = -vel.1.abs();
+            crate::physics::detect_corner::increment_corner_hit(pos.0, pos.1, width, height);
         }
     }
 }

@@ -352,6 +352,10 @@ impl SortVisualizer {
         if self.i + self.pivot >= n {
             self.i = 0;
             self.pivot /= 2;
+            if self.pivot == 0 {
+                self.state = SortState::Completed;
+                self.record_completion();
+            }
             return;
         }
         

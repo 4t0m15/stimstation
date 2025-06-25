@@ -1,4 +1,5 @@
-use crate::algorithms::sorter::{SortVisualizer, SortAlgorithm, SortState, initialize_algorithm_stats};
+use crate::algorithms::sorter::{SortVisualizer, SortAlgorithm, SortState, initialize_algorithm_stats, get_algorithm_stats};
+use crate::physics::detect_corner;
 
 static mut TOP_SORTER: Option<SortVisualizer> = None;
 static mut BOTTOM_SORTER: Option<SortVisualizer> = None;
@@ -9,16 +10,16 @@ pub fn initialize_sorters() {
     initialize_algorithm_stats();
     unsafe {
         if TOP_SORTER.is_none() {
-            TOP_SORTER = Some(SortVisualizer::new(SortAlgorithm::Merge));
+            TOP_SORTER = Some(SortVisualizer::new(SortAlgorithm::Bogo));
         }
         if BOTTOM_SORTER.is_none() {
-            BOTTOM_SORTER = Some(SortVisualizer::new(SortAlgorithm::Insertion));
+            BOTTOM_SORTER = Some(SortVisualizer::new(SortAlgorithm::Quick));
         }
         if LEFT_SORTER.is_none() {
-            LEFT_SORTER = Some(SortVisualizer::new(SortAlgorithm::Selection));
+            LEFT_SORTER = Some(SortVisualizer::new(SortAlgorithm::Bubble));
         }
         if RIGHT_SORTER.is_none() {
-            RIGHT_SORTER = Some(SortVisualizer::new(SortAlgorithm::Shell));
+            RIGHT_SORTER = Some(SortVisualizer::new(SortAlgorithm::Quick));
         }
     }
 }
@@ -72,50 +73,52 @@ pub fn restart_sorters() {
 }
 
 pub fn draw_algorithm_stats(frame: &mut [u8], width: u32, _height: u32, x_offset: usize, buffer_width: u32) {
-    use crate::algorithms::sorter::get_algorithm_stats;
-    
     if let Some(stats_arc) = get_algorithm_stats() {
         if let Ok(stats_map) = stats_arc.lock() {
-            let mut stats_lines = Vec::new();
-            
-            // Collect all algorithm stats
-            for (algorithm, count) in stats_map.iter() {
-                stats_lines.push(format!("{}: {}", algorithm.name(), count));
-            }
-            
-            // Sort by count (descending)
-            stats_lines.sort_by(|a, b| {
-                let a_count: u32 = a.split(": ").nth(1).unwrap_or("0").parse().unwrap_or(0);
-                let b_count: u32 = b.split(": ").nth(1).unwrap_or("0").parse().unwrap_or(0);
-                b_count.cmp(&a_count)
-            });
-            
-            // Position the stats in the top-left, away from the top border sorter
+            // Collect and sort algorithms by completion count
+            let mut stats_vec: Vec<(SortAlgorithm, u32)> =
+                stats_map.iter().map(|(alg, &cnt)| (alg.clone(), cnt)).collect();
+            stats_vec.sort_by(|a, b| b.1.cmp(&a.1));
+            // Only keep the top 4 algorithms for display
+            stats_vec.truncate(4);
+
+            let char_width = 8;
+            let char_height = 12;
+            let padding = 4;
             let stats_x = 10u32;
-            let mut stats_y = 10u32;
-            let char_width = 8u32;
-            let char_height = 12u32;
-            let line_spacing = 2u32;
-            let padding = 4u32;
-            
-            // Calculate max text width
-            let max_text_width = stats_lines.iter()
-                .map(|line| line.len() as u32 * char_width)
-                .max()
-                .unwrap_or(0);
-            
-            let total_height = stats_lines.len() as u32 * (char_height + line_spacing) - line_spacing;
-            
-            // Draw semi-transparent dark background
-            draw_background_rect(frame, stats_x - padding, stats_y - padding, 
-                               max_text_width + padding * 2, total_height + padding * 2, 
-                               [0, 0, 0, 180], width, x_offset, buffer_width);
-            
-            // Draw each line of text
-            for line in stats_lines {
-                draw_stats_text(frame, &line, stats_x, stats_y, [255, 255, 255, 255], width, x_offset, buffer_width);
-                stats_y += char_height + line_spacing;
+            let stats_y = 10u32;
+
+            // Calculate background dimensions based on longest text
+            let max_len = stats_vec.iter()
+                .map(|(alg, count)| format!("({}) - {}", count, alg.name()).len() as u32)
+                .max().unwrap_or(0);
+            let bg_width = max_len * char_width + padding * 2;
+            let bg_height = (char_height + 2) * stats_vec.len() as u32 + padding * 2;
+
+            // Draw background for leaderboard
+            draw_background_rect(frame, stats_x - padding, stats_y - padding,
+                                 bg_width, bg_height, [0, 0, 0, 180],
+                                 width, x_offset, buffer_width);
+
+            // Draw each algorithm entry
+            for (i, (alg, count)) in stats_vec.iter().enumerate() {
+                let text = format!("({}) - {}", count, alg.name());
+                let y_pos = stats_y + i as u32 * (char_height + 2);
+                draw_stats_text(frame, &text, stats_x, y_pos,
+                                [255, 255, 255, 255], width, x_offset, buffer_width);
             }
+
+            // Draw corner hits below leaderboard
+            let corner_hits = detect_corner::get_corner_hits();
+            let corner_text = format!("{} corner hits", corner_hits);
+            let corner_y = stats_y + stats_vec.len() as u32 * (char_height + 2) + padding;
+            let ct_width = corner_text.len() as u32 * char_width;
+            let ct_height = char_height;
+            draw_background_rect(frame, stats_x - padding, corner_y - padding,
+                                 ct_width + padding * 2, ct_height + padding * 2,
+                                 [0, 0, 0, 180], width, x_offset, buffer_width);
+            draw_stats_text(frame, &corner_text, stats_x, corner_y,
+                            [255, 255, 255, 255], width, x_offset, buffer_width);
         }
     }
 }
@@ -148,6 +151,7 @@ fn draw_stats_text(frame: &mut [u8], text: &str, x: u32, y: u32, color: [u8; 4],
                    frame_width: u32, x_offset: usize, buffer_width: u32) {
     let char_width = 8;
     let char_height = 12;
+    let padding = 4;
     
     for (i, ch) in text.chars().enumerate() {
         let char_x = x + (i as u32 * char_width);
@@ -181,6 +185,8 @@ fn draw_char(frame: &mut [u8], ch: char, x: u32, y: u32, color: [u8; 4],
 }
 
 fn get_char_pattern(ch: char) -> Vec<u8> {
+    // Convert lowercase letters to uppercase for pattern matching
+    let ch = ch.to_ascii_uppercase();
     // 8x12 bitmap patterns for characters
     match ch {
         '0' => vec![
@@ -393,6 +399,20 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             1,1,0,0,0,0,0,0,
             1,1,1,1,1,1,1,1,
         ],
+        'F' => vec![
+            1,1,1,1,1,1,1,1,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,1,1,1,1,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+            1,1,0,0,0,0,0,0,
+        ],
         'G' => vec![
             0,1,1,1,1,1,1,0,
             1,1,0,0,0,0,1,1,
@@ -407,19 +427,33 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             1,1,0,0,0,0,1,1,
             0,1,1,1,1,1,1,0,
         ],
-        'I' => vec![
+        'H' => vec![
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
             1,1,1,1,1,1,1,1,
-            0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
             1,1,1,1,1,1,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+            1,1,0,0,0,0,1,1,
+        ],
+        'J' => vec![
+            0,0,1,1,1,1,1,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,1,1,0,0,0,
+            1,1,0,1,1,0,0,0,
+            1,1,0,1,1,0,0,0,
+            0,1,1,0,1,1,0,0,
+            0,0,1,1,1,1,1,0,
         ],
         'K' => vec![
             1,1,0,0,0,0,1,1,
@@ -561,88 +595,18 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             1,1,0,0,0,0,1,1,
             0,1,1,1,1,1,1,0,
         ],
-        ':' => vec![
-            0,0,0,0,0,0,0,0,
-            0,0,0,0,0,0,0,0,
-            0,0,0,0,0,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,0,0,0,0,0,
-            0,0,0,0,0,0,0,0,
-            0,0,0,0,0,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,0,0,0,0,0,
-            0,0,0,0,0,0,0,0,
-        ],
-        'F' => vec![
-            1,1,1,1,1,1,1,1,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,1,1,1,1,0,0,
-            1,1,1,1,1,1,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-        ],
-        'H' => vec![
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,1,1,1,1,1,1,
-            1,1,1,1,1,1,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-        ],
-        'J' => vec![
-            0,0,0,0,0,0,1,1,
-            0,0,0,0,0,0,1,1,
-            0,0,0,0,0,0,1,1,
-            0,0,0,0,0,0,1,1,
-            0,0,0,0,0,0,1,1,
-            0,0,0,0,0,0,1,1,
-            0,0,0,0,0,0,1,1,
-            0,0,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            0,1,1,1,1,1,1,0,
-        ],
-        'P' => vec![
-            1,1,1,1,1,1,1,0,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,1,1,1,1,1,0,
-            1,1,1,1,1,1,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-            1,1,0,0,0,0,0,0,
-        ],
         'V' => vec![
             1,1,0,0,0,0,1,1,
             1,1,0,0,0,0,1,1,
             1,1,0,0,0,0,1,1,
             1,1,0,0,0,0,1,1,
             1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
-            1,1,0,0,0,0,1,1,
             0,1,1,0,0,1,1,0,
             0,1,1,0,0,1,1,0,
             0,0,1,1,1,1,0,0,
             0,0,1,1,1,1,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,1,1,0,0,0,
             0,0,0,1,1,0,0,0,
         ],
         'W' => vec![
@@ -666,10 +630,10 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             0,1,1,0,0,1,1,0,
             0,0,1,1,1,1,0,0,
             0,0,0,1,1,0,0,0,
-            0,0,0,1,1,0,0,0,
             0,0,1,1,1,1,0,0,
             0,1,1,0,0,1,1,0,
             0,1,1,0,0,1,1,0,
+            1,1,0,0,0,0,1,1,
             1,1,0,0,0,0,1,1,
             1,1,0,0,0,0,1,1,
         ],
@@ -701,49 +665,63 @@ fn get_char_pattern(ch: char) -> Vec<u8> {
             1,1,0,0,0,0,0,0,
             1,1,1,1,1,1,1,1,
         ],
-        ' ' => vec![0; 96], // Space
-        '(' => vec![
-            0,0,0,0,1,1,0,0,
-            0,0,0,1,1,0,0,0,
+        '.' => vec![
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
             0,0,1,1,0,0,0,0,
-            0,0,1,1,0,0,0,0,
-            0,1,1,0,0,0,0,0,
-            0,1,1,0,0,0,0,0,
-            0,1,1,0,0,0,0,0,
-            0,1,1,0,0,0,0,0,
-            0,0,1,1,0,0,0,0,
-            0,0,1,1,0,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,0,1,1,0,0,
-        ],
-        ')' => vec![
-            0,0,1,1,0,0,0,0,
-            0,0,0,1,1,0,0,0,
-            0,0,0,0,1,1,0,0,
-            0,0,0,0,1,1,0,0,
-            0,0,0,0,0,1,1,0,
-            0,0,0,0,0,1,1,0,
-            0,0,0,0,0,1,1,0,
-            0,0,0,0,0,1,1,0,
-            0,0,0,0,1,1,0,0,
-            0,0,0,0,1,1,0,0,
-            0,0,0,1,1,0,0,0,
             0,0,1,1,0,0,0,0,
         ],
-        '-' => vec![
+        '!' => vec![
+            0,0,1,1,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+        ],
+        '?' => vec![
+            0,1,1,1,1,1,1,0,
+            1,1,0,0,0,0,1,1,
+            0,0,0,0,0,0,1,1,
+            0,0,0,0,0,1,1,0,
+            0,0,0,0,1,1,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,1,1,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,0,0,0,0,0,0,
+        ],
+        ':' => vec![
+            0,0,0,0,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,1,1,0,0,0,0,
             0,0,0,0,0,0,0,0,
             0,0,0,0,0,0,0,0,
             0,0,0,0,0,0,0,0,
             0,0,0,0,0,0,0,0,
             0,0,0,0,0,0,0,0,
-            0,0,0,0,0,0,0,0,
-            1,1,1,1,1,1,1,1,
-            0,0,0,0,0,0,0,0,
-            0,0,0,0,0,0,0,0,
-            0,0,0,0,0,0,0,0,
+            0,0,1,1,0,0,0,0,
+            0,0,1,1,0,0,0,0,
             0,0,0,0,0,0,0,0,
             0,0,0,0,0,0,0,0,
         ],
-        _ => vec![1; 96], // Default block pattern for unknown characters
+        // Default block pattern for unknown characters
+        _ => vec![1; 96], 
     }
 }

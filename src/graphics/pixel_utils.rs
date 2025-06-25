@@ -1,15 +1,24 @@
-use crate::core::types::{WIDTH, HEIGHT};
+use crate::core::types::{HEIGHT, WIDTH};
 pub fn set_pixel_safe(frame: &mut [u8], x: i32, y: i32, width: u32, height: u32, color: [u8; 4]) {
     if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
         let idx = 4 * (y as usize * width as usize + x as usize);
-        if idx + 3 < frame.len() {            frame[idx] = color[0];
+        if idx + 3 < frame.len() {
+            frame[idx] = color[0];
             frame[idx + 1] = color[1];
             frame[idx + 2] = color[2];
             frame[idx + 3] = color[3];
         }
     }
 }
-pub fn blend_pixel_safe(frame: &mut [u8], x: i32, y: i32, width: u32, height: u32, color: [u8; 4], intensity: f32) {
+pub fn blend_pixel_safe(
+    frame: &mut [u8],
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    color: [u8; 4],
+    intensity: f32,
+) {
     if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
         let idx = 4 * (y as usize * width as usize + x as usize);
         if idx + 3 < frame.len() {
@@ -70,8 +79,11 @@ pub fn draw_line(frame: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, color: [u
     let mut y = y0;
     let glow_radius = width * 3;
     let height = frame.len() / (4 * WIDTH as usize);
-    if (x0 < 0 && x1 < 0) || (x0 >= WIDTH as i32 && x1 >= WIDTH as i32) ||
-       (y0 < 0 && y1 < 0) || (y0 >= height as i32 && y1 >= height as i32) {
+    if (x0 < 0 && x1 < 0)
+        || (x0 >= WIDTH as i32 && x1 >= WIDTH as i32)
+        || (y0 < 0 && y1 < 0)
+        || (y0 >= height as i32 && y1 >= height as i32)
+    {
         return;
     }
     while x >= 0 && x < WIDTH as i32 && y >= 0 && y < HEIGHT as i32 {
@@ -79,34 +91,58 @@ pub fn draw_line(frame: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, color: [u
             for w_x in -glow_radius..=glow_radius {
                 let distance_squared = w_x * w_x + w_y * w_y;
                 let distance = (distance_squared as f32).sqrt();
-                if distance > glow_radius as f32 { continue; }
+                if distance > glow_radius as f32 {
+                    continue;
+                }
                 let intensity = if distance <= width as f32 {
                     1.0
                 } else {
-                    let falloff = 1.0 - (distance - width as f32) / (glow_radius as f32 - width as f32);
+                    let falloff =
+                        1.0 - (distance - width as f32) / (glow_radius as f32 - width as f32);
                     falloff * falloff
                 };
-                blend_pixel_safe(frame, x + w_x, y + w_y, WIDTH, HEIGHT as u32, color, intensity);
+                blend_pixel_safe(
+                    frame,
+                    x + w_x,
+                    y + w_y,
+                    WIDTH,
+                    HEIGHT as u32,
+                    color,
+                    intensity,
+                );
             }
         }
-        if x == x1 && y == y1 { break; }
+        if x == x1 && y == y1 {
+            break;
+        }
         let e2 = 2 * err;
-        if e2 > -dy { err -= dy; x += sx; }
-        if e2 < dx { err += dx; y += sy; }
+        if e2 > -dy {
+            err -= dy;
+            x += sx;
+        }
+        if e2 < dx {
+            err += dx;
+            y += sy;
+        }
     }
 }
 pub fn draw_point(frame: &mut [u8], x: i32, y: i32, color: [u8; 4], size: i32) {
     let glow_radius = size * 2;
     let _height = frame.len() / (4 * WIDTH as usize);
-    if x + glow_radius < 0 || x - glow_radius >= WIDTH as i32 ||
-       y + glow_radius < 0 || y - glow_radius >= HEIGHT as i32 {
+    if x + glow_radius < 0
+        || x - glow_radius >= WIDTH as i32
+        || y + glow_radius < 0
+        || y - glow_radius >= HEIGHT as i32
+    {
         return;
     }
     for w_y in -glow_radius..=glow_radius {
         for w_x in -glow_radius..=glow_radius {
             let distance_squared = w_x * w_x + w_y * w_y;
             let distance = (distance_squared as f32).sqrt();
-            if distance > glow_radius as f32 { continue; }
+            if distance > glow_radius as f32 {
+                continue;
+            }
             let intensity = if distance <= size as f32 {
                 1.0
             } else {
@@ -117,30 +153,48 @@ pub fn draw_point(frame: &mut [u8], x: i32, y: i32, color: [u8; 4], size: i32) {
             let r = (intensity * color[0] as f32 * alpha_factor) as u8;
             let g = (intensity * color[1] as f32 * alpha_factor) as u8;
             let b = (intensity * color[2] as f32 * alpha_factor) as u8;
-            blend_pixel_safe(frame, x + w_x, y + w_y, WIDTH, HEIGHT as u32, [r, g, b, color[3]], 1.0);
+            blend_pixel_safe(
+                frame,
+                x + w_x,
+                y + w_y,
+                WIDTH,
+                HEIGHT as u32,
+                [r, g, b, color[3]],
+                1.0,
+            );
         }
     }
 }
 pub fn draw_circle(frame: &mut [u8], x: i32, y: i32, radius: i32, color: [u8; 4], width: u32) {
     let height = frame.len() / (4 * width as usize);
-    if x + radius < 0 || x - radius >= width as i32 || 
-       y + radius < 0 || y - radius >= height as i32 {
+    if x + radius < 0 || x - radius >= width as i32 || y + radius < 0 || y - radius >= height as i32
+    {
         return;
     }
     let radius_sq = radius * radius;
     for dy in -radius..=radius {
         for dx in -radius..=radius {
-            if dx*dx + dy*dy <= radius_sq {
+            if dx * dx + dy * dy <= radius_sq {
                 set_pixel_safe(frame, x + dx, y + dy, width, height as u32, color);
             }
         }
     }
 }
-pub fn draw_extra_bright_particle(frame: &mut [u8], x: i32, y: i32, size: i32, color: [u8; 4], width: u32) {
+pub fn draw_extra_bright_particle(
+    frame: &mut [u8],
+    x: i32,
+    y: i32,
+    size: i32,
+    color: [u8; 4],
+    width: u32,
+) {
     let glow_radius = size * 3;
     let height = frame.len() / (4 * width as usize);
-    if x + glow_radius < 0 || x - glow_radius >= width as i32 || 
-       y + glow_radius < 0 || y - glow_radius >= height as i32 {
+    if x + glow_radius < 0
+        || x - glow_radius >= width as i32
+        || y + glow_radius < 0
+        || y - glow_radius >= height as i32
+    {
         return;
     }
     for dy in -glow_radius..=glow_radius {
@@ -163,10 +217,12 @@ pub fn draw_extra_bright_particle(frame: &mut [u8], x: i32, y: i32, size: i32, c
             let b = (intensity * color[2] as f32 * alpha_factor * 3.0).min(255.0) as u8;
             blend_pixel_safe(
                 frame,
-                x + dx, y + dy,
-                width, height as u32,
+                x + dx,
+                y + dy,
+                width,
+                height as u32,
                 [r, g, b, 255],
-                1.0
+                1.0,
             );
         }
     }
@@ -186,8 +242,10 @@ pub fn draw_huge_text(frame: &mut [u8], text: &str, x: i32, y: i32, color: [u8; 
         }
         for dy in 0..char_height {
             for dx in 0..char_width {
-                let is_border = dx < stroke_width || dx >= char_width - stroke_width || 
-                               dy < stroke_width || dy >= char_height - stroke_width;
+                let is_border = dx < stroke_width
+                    || dx >= char_width - stroke_width
+                    || dy < stroke_width
+                    || dy >= char_height - stroke_width;
                 if is_border {
                     set_pixel_safe(frame, cx + dx, y + dy, width, height as u32, color);
                 }
@@ -195,7 +253,15 @@ pub fn draw_huge_text(frame: &mut [u8], text: &str, x: i32, y: i32, color: [u8; 
         }
     }
 }
-pub fn draw_border(frame: &mut [u8], x: i32, y: i32, width: i32, height: i32, color: [u8; 4], stride: u32) {
+pub fn draw_border(
+    frame: &mut [u8],
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    color: [u8; 4],
+    stride: u32,
+) {
     let border_width = 3;
     for dy in 0..border_width {
         for dx in 0..width {
@@ -250,7 +316,20 @@ pub fn draw_border(frame: &mut [u8], x: i32, y: i32, width: i32, height: i32, co
         }
     }
 }
-pub fn draw_segment(frame: &mut [u8], x: i32, y: i32, a: bool, b: bool, c: bool, d: bool, e: bool, f: bool, g: bool, color: [u8; 4], width: u32) {
+pub fn draw_segment(
+    frame: &mut [u8],
+    x: i32,
+    y: i32,
+    a: bool,
+    b: bool,
+    c: bool,
+    d: bool,
+    e: bool,
+    f: bool,
+    g: bool,
+    color: [u8; 4],
+    width: u32,
+) {
     let height = frame.len() / (4 * width as usize);
     let thickness = 2;
     if a {
@@ -304,12 +383,16 @@ pub fn draw_segment(frame: &mut [u8], x: i32, y: i32, a: bool, b: bool, c: bool,
     }
 }
 pub fn draw_triangle_filled(
-    frame: &mut [u8], 
-    x1: i32, y1: i32, 
-    x2: i32, y2: i32, 
-    x3: i32, y3: i32, 
-    width: u32, height: u32, 
-    color: [u8; 4]
+    frame: &mut [u8],
+    x1: i32,
+    y1: i32,
+    x2: i32,
+    y2: i32,
+    x3: i32,
+    y3: i32,
+    width: u32,
+    height: u32,
+    color: [u8; 4],
 ) {
     let mut vertices = [(x1, y1), (x2, y2), (x3, y3)];
     vertices.sort_by_key(|&(_, y)| y);
@@ -329,7 +412,7 @@ pub fn draw_triangle_filled(
     if y3 > y2 {
         let slope1 = (x3 - x2) as f32 / (y3 - y2) as f32;
         let slope2 = (x3 - x1) as f32 / (y3 - y1) as f32;
-        for y in y2+1..=y3 {
+        for y in y2 + 1..=y3 {
             let dy1 = y - y2;
             let dy2 = y - y1;
             let start_x = (x2 as f32 + slope1 * dy1 as f32) as i32;

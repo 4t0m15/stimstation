@@ -1,12 +1,12 @@
+use rand::prelude::*;
 use rodio::Source;
 use std::time::Duration;
-use rand::prelude::*;
 
 /// White noise generation module for StimStation
-/// 
+///
 /// This module provides white noise generation capabilities that can be used
 /// for audio processing, testing, or background sound generation.
-/// 
+///
 /// Note: This module is currently not actively used in the main application
 /// but is available for future use and experimentation.
 
@@ -21,10 +21,10 @@ pub struct NoiseSource {
 
 impl NoiseSource {
     /// Creates a new NoiseSource with the specified sample rate.
-    /// 
+    ///
     /// # Arguments
     /// * `sample_rate` - The audio sample rate in Hz (e.g., 44100)
-    /// 
+    ///
     /// # Returns
     /// A new NoiseSource instance with default amplitude of 0.25
     pub fn new(sample_rate: u32) -> Self {
@@ -36,10 +36,10 @@ impl NoiseSource {
     }
 
     /// Sets the amplitude (volume) of the white noise.
-    /// 
+    ///
     /// # Arguments
     /// * `amplitude` - The amplitude value, clamped between 0.0 and 1.0
-    /// 
+    ///
     /// # Returns
     /// Self for method chaining
     pub fn with_amplitude(mut self, amplitude: f32) -> Self {
@@ -53,7 +53,7 @@ impl NoiseSource {
     }
 
     /// Sets the amplitude value.
-    /// 
+    ///
     /// # Arguments
     /// * `amplitude` - The new amplitude value, clamped between 0.0 and 1.0
     pub fn set_amplitude(&mut self, amplitude: f32) {
@@ -93,11 +93,11 @@ impl Source for NoiseSource {
 }
 
 /// Generates a buffer of white noise samples.
-/// 
+///
 /// # Arguments
 /// * `buffer` - Mutable slice to fill with noise samples
 /// * `amplitude` - The amplitude (volume) of the noise, between 0.0 and 1.0
-/// 
+///
 /// # Example
 /// ```
 /// let mut buffer = vec![0.0; 1024];
@@ -106,17 +106,17 @@ impl Source for NoiseSource {
 pub fn generate_white_noise_buffer(buffer: &mut [f32], amplitude: f32) {
     let amplitude = amplitude.clamp(0.0, 1.0);
     let mut rng = rand::thread_rng();
-    
+
     for sample in buffer.iter_mut() {
         *sample = rng.gen_range(-1.0..1.0) * amplitude;
     }
 }
 
 /// Generates a single white noise sample.
-/// 
+///
 /// # Arguments
 /// * `amplitude` - The amplitude (volume) of the noise, between 0.0 and 1.0
-/// 
+///
 /// # Returns
 /// A single white noise sample as f32
 pub fn generate_white_noise_sample(amplitude: f32) -> f32 {
@@ -146,7 +146,7 @@ mod tests {
     fn test_amplitude_clamping() {
         let noise = NoiseSource::new(44100).with_amplitude(2.0);
         assert_eq!(noise.amplitude(), 1.0);
-        
+
         let noise = NoiseSource::new(44100).with_amplitude(-0.5);
         assert_eq!(noise.amplitude(), 0.0);
     }
@@ -155,10 +155,10 @@ mod tests {
     fn test_generate_white_noise_buffer() {
         let mut buffer = vec![0.0; 100];
         generate_white_noise_buffer(&mut buffer, 0.5);
-        
+
         // Check that buffer is no longer all zeros
         assert!(buffer.iter().any(|&x| x != 0.0));
-        
+
         // Check that all values are within expected range
         for &sample in &buffer {
             assert!(sample >= -0.5 && sample <= 0.5);

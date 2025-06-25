@@ -31,7 +31,14 @@ pub fn initialize_audio_integration() {
     }
 }
 
-pub fn update_and_draw_audio(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset: usize, buffer_width: u32) {
+pub fn update_and_draw_audio(
+    frame: &mut [u8],
+    width: u32,
+    height: u32,
+    time: f32,
+    x_offset: usize,
+    buffer_width: u32,
+) {
     unsafe {
         if let Some(audio_integration) = AUDIO_INTEGRATION.as_mut() {
             let monitor_height = MONITOR_HEIGHT;
@@ -41,10 +48,16 @@ pub fn update_and_draw_audio(frame: &mut [u8], width: u32, height: u32, time: f3
     }
 }
 
-pub fn initialize_text_renderer() {
-}
+pub fn initialize_text_renderer() {}
 
-pub fn update_and_draw_text(frame: &mut [u8], width: u32, height: u32, time: f32, x_offset: usize, buffer_width: u32) {
+pub fn update_and_draw_text(
+    frame: &mut [u8],
+    width: u32,
+    height: u32,
+    time: f32,
+    x_offset: usize,
+    buffer_width: u32,
+) {
     unsafe {
         if let Some(text_renderer) = TEXT_RENDERER.as_mut() {
             text_renderer.update(time, width, height);

@@ -20,7 +20,5 @@ pub fn reset_corner_hits() {
 
 /// Get the total number of corner hits
 pub fn get_corner_hits() -> u32 {
-    unsafe {
-        CORNER_HITS
-    }
+    unsafe { CORNER_HITS }
 }

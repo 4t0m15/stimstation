@@ -1,12 +1,15 @@
+use crate::core::types::HEIGHT;
+use crate::graphics::pixel_utils::{blend_pixel_safe, draw_rectangle_safe};
 use ab_glyph::{Font, FontArc, PxScale};
 use font_kit::source::SystemSource;
 use once_cell::sync::Lazy;
-use crate::graphics::pixel_utils::{blend_pixel_safe, draw_rectangle_safe};
-use crate::core::types::HEIGHT;
 
 static FONT: Lazy<FontArc> = Lazy::new(|| {
     let handle = SystemSource::new()
-        .select_best_match(&[font_kit::family_name::FamilyName::Monospace], &Default::default())
+        .select_best_match(
+            &[font_kit::family_name::FamilyName::Monospace],
+            &Default::default(),
+        )
         .unwrap();
     let font_data = handle.load().unwrap().copy_font_data().unwrap();
     FontArc::try_from_vec((*font_data).clone()).unwrap()
@@ -39,11 +42,19 @@ pub fn draw_text_with_background(
     draw_text_ab_glyph(frame, text, x, y, text_color, width);
 }
 
-pub fn draw_text_ab_glyph(frame: &mut [u8], text: &str, x: f32, y: f32, color: [u8; 4], width: u32) {
+pub fn draw_text_ab_glyph(
+    frame: &mut [u8],
+    text: &str,
+    x: f32,
+    y: f32,
+    color: [u8; 4],
+    width: u32,
+) {
     let scale = PxScale::from(20.0);
     let font = &*FONT;
     let cursor_x = x;
-    let glyphs: Vec<_> = text.chars()
+    let glyphs: Vec<_> = text
+        .chars()
         .scan(cursor_x, |x_pos, c| {
             if c.is_control() {
                 return Some(None);
@@ -104,7 +115,15 @@ pub fn draw_keyboard_guide(frame: &mut [u8], width: u32) {
     let mut y = 30.0;
     let line_height = 25.0;
     for line in guide_text.iter() {
-        draw_text_with_background(frame, line, 10.0, y, [255, 255, 255, 255], [0, 0, 0, 128], width);
+        draw_text_with_background(
+            frame,
+            line,
+            10.0,
+            y,
+            [255, 255, 255, 255],
+            [0, 0, 0, 128],
+            width,
+        );
         y += line_height;
     }
 }

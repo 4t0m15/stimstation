@@ -1,8 +1,8 @@
 use glam::Vec2;
-use palette::{Hsv, Srgb, IntoColor};
-use std::time::{Instant, Duration};
-use std::collections::VecDeque;
+use palette::{Hsv, IntoColor, Srgb};
 use rand::prelude::*;
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 pub type Color = Srgb<u8>;
 pub type Position = Vec2;
 pub type Velocity = Vec2;
@@ -41,7 +41,8 @@ pub struct Line {
 }
 pub type SimplePos = (f32, f32);
 #[derive(Debug)]
-pub struct SimpleLine {    pub pos: [SimplePos; 2],
+pub struct SimpleLine {
+    pub pos: [SimplePos; 2],
     pub vel: [SimplePos; 2],
     pub color: SimpleColor,
     pub width: f32,
@@ -112,8 +113,8 @@ impl Line {
             pos: [
                 Position::new(x, y),
                 Position::new(
-                    x + rng.gen_range(-length/2.0..length/2.0),
-                    y + rng.gen_range(-length/2.0..length/2.0)
+                    x + rng.gen_range(-length / 2.0..length / 2.0),
+                    y + rng.gen_range(-length / 2.0..length / 2.0),
                 ),
             ],
             vel: [

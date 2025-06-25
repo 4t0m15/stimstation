@@ -1,15 +1,18 @@
-use rodio::{OutputStream, Sink, Source, Decoder};
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
-use std::thread;
-use std::time::Duration;
-use std::fs::File;
-use std::io::BufReader;
-use rand::prelude::*;
+use crate::audio::audio_download::ensure_audio_file;
 use crate::audio::audio_handler::{analyze_audio, set_audio_spectrum, AUDIO_VIZ_BARS};
 use crate::audio::white_noise::NoiseSource;
-use crate::audio::audio_download::ensure_audio_file;
+use rand::prelude::*;
+use rodio::{Decoder, OutputStream, Sink, Source};
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::thread;
+use std::time::Duration;
 static AUDIO_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
-static WHITE_NOISE_ENABLED: AtomicBool = AtomicBool::new(true);
+static WHITE_NOISE_ENABLED: AtomicBool = AtomicBool::new(false);
 static DOWNLOAD_ATTEMPTED: AtomicBool = AtomicBool::new(false);
 
 pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
@@ -18,7 +21,8 @@ pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
     }
     AUDIO_THREAD_STARTED.store(true, Ordering::SeqCst);
     let audio_spectrum = Arc::new(Mutex::new(vec![0.0; AUDIO_VIZ_BARS]));
-    set_audio_spectrum(audio_spectrum.clone());    let handle = thread::spawn(move || {        
+    set_audio_spectrum(audio_spectrum.clone());
+    let handle = thread::spawn(move || {
         // Try to get the audio file - use blocking approach with futures executor
         // Only attempt download once per application run
         let audio_path = if !DOWNLOAD_ATTEMPTED.load(Ordering::SeqCst) {
@@ -42,7 +46,7 @@ pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
                 None
             }
         };
-          let (_stream, stream_handle) = match OutputStream::try_default() {
+        let (_stream, stream_handle) = match OutputStream::try_default() {
             Ok(result) => result,
             Err(e) => {
                 eprintln!("Failed to get audio output stream: {}", e);
@@ -58,7 +62,7 @@ pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
                 return;
             }
         };
-        
+
         // Try to load and play the audio file if available
         if let Some(path) = audio_path {
             match File::open(&path) {
@@ -66,15 +70,16 @@ pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
                     match Decoder::new(BufReader::new(file)) {
                         Ok(source) => {
                             // Create a custom source that captures audio data for analysis
-                            let analyzing_source = AnalyzingSource::new(source, audio_spectrum.clone());
+                            let analyzing_source =
+                                AnalyzingSource::new(source, audio_spectrum.clone());
                             sink.append(analyzing_source);
                             sink.play();
-                            
+
                             // Keep the thread alive while audio is playing
                             while !sink.empty() && AUDIO_THREAD_STARTED.load(Ordering::SeqCst) {
                                 thread::sleep(Duration::from_millis(100));
                             }
-                            
+
                             // Loop the audio by restarting
                             if AUDIO_THREAD_STARTED.load(Ordering::SeqCst) {
                                 println!("Audio finished, restarting...");
@@ -82,18 +87,18 @@ pub fn start_audio_thread() -> Option<thread::JoinHandle<()>> {
                                 let _ = start_audio_thread(); // Restart the audio
                             }
                             return;
-                        },
+                        }
                         Err(e) => {
                             eprintln!("Failed to decode audio file: {}", e);
                         }
                     }
-                },
+                }
                 Err(e) => {
                     eprintln!("Failed to open audio file: {}", e);
                 }
             }
         }
-          // Fallback to white noise if audio file couldn't be loaded
+        // Fallback to white noise if audio file couldn't be loaded
         fallback_audio_thread_with_sink(audio_spectrum, sink);
     });
     Some(handle)
@@ -105,7 +110,7 @@ fn fallback_audio_thread_with_sink(audio_spectrum: Arc<Mutex<Vec<f32>>>, sink: S
         AUDIO_THREAD_STARTED.store(false, Ordering::SeqCst);
         return;
     }
-    
+
     println!("Using fallback white noise audio (press 9 to disable)");
     let sample_rate = 44100;
     let noise = NoiseSource::new(sample_rate).with_amplitude(0.15);
@@ -113,9 +118,12 @@ fn fallback_audio_thread_with_sink(audio_spectrum: Arc<Mutex<Vec<f32>>>, sink: S
     let mut audio_buffer = vec![0.0; buffer_size];
     let mut buffer_pos = 0;
     sink.append(noise);
-    while !sink.empty() && AUDIO_THREAD_STARTED.load(Ordering::SeqCst) && WHITE_NOISE_ENABLED.load(Ordering::SeqCst) {
+    while !sink.empty()
+        && AUDIO_THREAD_STARTED.load(Ordering::SeqCst)
+        && WHITE_NOISE_ENABLED.load(Ordering::SeqCst)
+    {
         thread::sleep(Duration::from_millis(10));
-        for _ in 0..buffer_size/10 {
+        for _ in 0..buffer_size / 10 {
             let noise_val = if WHITE_NOISE_ENABLED.load(Ordering::SeqCst) {
                 rand::thread_rng().gen_range(-1.0..1.0) * 0.15
             } else {
@@ -164,13 +172,13 @@ where
             let sample_f32 = sample as f32 / 32768.0;
             self.buffer[self.buffer_pos] = sample_f32;
             self.buffer_pos += 1;
-            
+
             // When buffer is full, analyze it
             if self.buffer_pos >= self.buffer_size {
                 analyze_audio(&self.buffer, self.spectrum.clone());
                 self.buffer_pos = 0;
             }
-            
+
             Some(sample)
         } else {
             None
@@ -236,7 +244,10 @@ impl ToneSource {
 impl Iterator for ToneSource {
     type Item = f32;
     fn next(&mut self) -> Option<f32> {
-        let sample = (self.position * 2.0 * std::f32::consts::PI * self.frequency / self.sample_rate as f32).sin() * self.amplitude;
+        let sample = (self.position * 2.0 * std::f32::consts::PI * self.frequency
+            / self.sample_rate as f32)
+            .sin()
+            * self.amplitude;
         self.position += 1.0;
         if self.position >= self.sample_rate as f32 {
             self.position = 0.0;

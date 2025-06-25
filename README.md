@@ -1,4 +1,4 @@
-# Read ME, not ANYONE else
+# Read ME, not ANYONE else lol
 
 **StimStation** is a **_VERY_ cool** visualizer written in Rust inspired by the visuals in short form "sludge" content
  
@@ -10,7 +10,7 @@ Based on a lot of the visuals I see in short-form content I combined them all so
 
 - Ray-based pattern generation with 2 moving "centers"
 - Real-time bar graph visualization, ideal for sorting or signal data
-- Lightweight UI controls for switching modes
+- controls for switching tracks
 - Modular structure for extending with new visualization components
 
 ### Prerequisites

@@ -1,13 +1,11 @@
 use crate::audio::audio_handler::AudioVisualizer;
-use crate::audio::audio_playback::{start_audio_thread, is_audio_thread_started};
+use crate::audio::audio_playback::{is_audio_thread_started, start_audio_thread};
 pub struct AudioIntegration {
     visualizer: Option<AudioVisualizer>,
 }
 impl AudioIntegration {
     pub fn new() -> Self {
-        Self {
-            visualizer: None,
-        }
+        Self { visualizer: None }
     }
     pub fn initialize(&mut self) {
         if self.visualizer.is_none() {
@@ -24,7 +22,14 @@ impl AudioIntegration {
             audio_viz.update(time, monitor_height);
         }
     }
-    pub fn draw(&mut self, frame: &mut [u8], width: u32, height: u32, x_offset: usize, buffer_width: u32) {
+    pub fn draw(
+        &mut self,
+        frame: &mut [u8],
+        width: u32,
+        height: u32,
+        x_offset: usize,
+        buffer_width: u32,
+    ) {
         if let Some(audio_viz) = self.visualizer.as_mut() {
             audio_viz.draw(frame, width, height, x_offset, buffer_width);
         }

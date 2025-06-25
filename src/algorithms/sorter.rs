@@ -204,26 +204,29 @@ impl SortVisualizer {
     
     fn update_bubble(&mut self) {
         let n = self.array.len();
-        if self.i >= n {
-            if self.j == 0 {
-                self.state = SortState::Completed;
-                self.record_completion();
-            } else {
-                self.i = 0;
-                self.j = 0;
-            }
+        if self.i >= n - 1 {
+            self.state = SortState::Completed;
+            self.record_completion();
             return;
         }
-        if self.i < n - 1 {
+
+        let mut swapped_in_pass = false;
+        for j in 0..(n - 1 - self.i) {
             self.comparisons += 1;
             self.accesses += 2;
-            if self.array[self.i] > self.array[self.i + 1] {
-                self.array.swap(self.i, self.i + 1);
+            if self.array[j] > self.array[j+1] {
+                self.array.swap(j, j+1);
                 self.accesses += 2;
-                self.j += 1;
+                swapped_in_pass = true;
             }
         }
+
         self.i += 1;
+
+        if !swapped_in_pass {
+            self.state = SortState::Completed;
+            self.record_completion();
+        }
     }
     
     fn update_quick(&mut self) {
@@ -276,25 +279,19 @@ impl SortVisualizer {
             return;
         }
         
-        if self.j == 0 {
-            self.j = self.i;
-        }
-        
-        if self.j > 0 {
+        let mut j = self.i;
+        while j > 0 {
             self.comparisons += 1;
             self.accesses += 2;
-            if self.array[self.j - 1] > self.array[self.j] {
-                self.array.swap(self.j - 1, self.j);
+            if self.array[j - 1] > self.array[j] {
+                self.array.swap(j - 1, j);
                 self.accesses += 2;
-                self.j -= 1;
+                j -= 1;
             } else {
-                self.i += 1;
-                self.j = 0;
+                break;
             }
-        } else {
-            self.i += 1;
-            self.j = 0;
         }
+        self.i += 1;
     }
     
     fn update_selection(&mut self) {
@@ -305,26 +302,20 @@ impl SortVisualizer {
             return;
         }
         
-        if self.j == 0 {
-            self.j = self.i;
-            self.pivot = self.i;
-        }
-        
-        if self.j < n {
+        let mut min_idx = self.i;
+        for j in (self.i + 1)..n {
             self.comparisons += 1;
             self.accesses += 2;
-            if self.array[self.j] < self.array[self.pivot] {
-                self.pivot = self.j;
+            if self.array[j] < self.array[min_idx] {
+                min_idx = j;
             }
-            self.j += 1;
-        } else {
-            if self.pivot != self.i {
-                self.array.swap(self.i, self.pivot);
-                self.accesses += 2;
-            }
-            self.i += 1;
-            self.j = 0;
         }
+
+        if min_idx != self.i {
+            self.array.swap(self.i, min_idx);
+            self.accesses += 2;
+        }
+        self.i += 1;
     }
     
     fn update_heap(&mut self) {
@@ -340,32 +331,26 @@ impl SortVisualizer {
     fn update_shell(&mut self) {
         let n = self.array.len();
         if self.pivot == 0 {
-            self.pivot = n / 2;
-        }
-        
-        if self.pivot == 0 {
             self.state = SortState::Completed;
             self.record_completion();
             return;
         }
-        
-        if self.i + self.pivot >= n {
-            self.i = 0;
-            self.pivot /= 2;
-            if self.pivot == 0 {
-                self.state = SortState::Completed;
-                self.record_completion();
+
+        // Gapped insertion sort
+        for i in self.pivot..n {
+            let temp = self.array[i];
+            self.accesses += 1;
+            let mut j = i;
+            while j >= self.pivot && self.array[j - self.pivot] > temp {
+                self.array[j] = self.array[j - self.pivot];
+                self.accesses += 2;
+                j -= self.pivot;
             }
-            return;
+            self.array[j] = temp;
+            self.accesses += 1;
         }
-        
-        self.comparisons += 1;
-        self.accesses += 2;
-        if self.array[self.i] > self.array[self.i + self.pivot] {
-            self.array.swap(self.i, self.i + self.pivot);
-            self.accesses += 2;
-        }
-        self.i += 1;
+
+        self.pivot /= 2;
     }
     
     fn update_cocktail(&mut self) {

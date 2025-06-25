@@ -10,6 +10,7 @@ use winit::{
 };
 use std::fs;
 use std::path::PathBuf;
+use crate::text::text_rendering::{draw_text_ab_glyph, draw_text_with_background};
 
 #[derive(Clone)]
 pub struct DownloadProgress {
@@ -137,7 +138,7 @@ fn draw_progress_bar(frame: &mut [u8], width: u32, height: u32, progress: &Downl
 fn draw_text(frame: &mut [u8], width: u32, height: u32, progress: &DownloadProgress) {
     // Draw status message
     let message_y = height / 2 - 40;
-    draw_simple_text(frame, &progress.message, 50, message_y, [200, 200, 200, 255], width);
+    draw_text_ab_glyph(frame, &progress.message, 50.0, message_y as f32, [200, 200, 200, 255], width);
 
     // Draw progress percentage
     if progress.total > 0 {
@@ -148,7 +149,7 @@ fn draw_text(frame: &mut [u8], width: u32, height: u32, progress: &DownloadProgr
             progress.total as f64 / 1024.0 / 1024.0
         );
         let progress_y = height / 2 + 35;
-        draw_simple_text(frame, &progress_text, 50, progress_y, [180, 180, 180, 255], width);
+        draw_text_ab_glyph(frame, &progress_text, 50.0, progress_y as f32, [180, 180, 180, 255], width);
     }
 }
 
@@ -222,48 +223,6 @@ fn draw_rectangle_outline(frame: &mut [u8], x: u32, y: u32, width: u32, height: 
     }
 }
 
-fn draw_simple_text(frame: &mut [u8], text: &str, x: u32, y: u32, color: [u8; 4], frame_width: u32) {
-    let char_width = 8;
-    let char_height = 12;
-    
-    for (i, ch) in text.chars().enumerate() {
-        let char_x = x + (i as u32 * char_width);
-        draw_char(frame, ch, char_x, y, color, frame_width, char_width, char_height);
-    }
-}
-
-fn draw_char(frame: &mut [u8], ch: char, x: u32, y: u32, color: [u8; 4], frame_width: u32, char_width: u32, _char_height: u32) {
-    // Simple bitmap font for basic characters
-    let pattern = get_char_pattern(ch);
-
-    for (i, &pixel) in pattern.iter().enumerate() {
-        if pixel > 0 {
-            let px = x + (i as u32 % char_width);
-            let py = y + (i as u32 / char_width);
-            
-            if px < frame_width && py < frame.len() as u32 / 4 / frame_width {
-                let index = ((py * frame_width + px) * 4) as usize;
-                if index + 3 < frame.len() {
-                    frame[index] = color[0];
-                    frame[index + 1] = color[1];
-                    frame[index + 2] = color[2];
-                    frame[index + 3] = color[3];
-                }
-            }
-        }
-    }
-}
-
-fn get_char_pattern(ch: char) -> Vec<u8> {
-    // Simple bitmap patterns for common characters
-    match ch {
-        'A'..='Z' | 'a'..='z' => vec![1; 96], // Simple block for letters
-        '0'..='9' => vec![1; 96], // Simple block for numbers
-        ' ' => vec![0; 96], // Space
-        '.' | '%' | '(' | ')' | '/' | '-' | ':' => vec![1; 96], // Simple block for symbols
-        _ => vec![1; 96], // Default block
-    }
-}
 
 // Global flag to track if we're already showing a download window
 static DOWNLOAD_WINDOW_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -557,7 +516,7 @@ fn draw_error_window(pixels: &mut Pixels, error_message: &str) {
     draw_rectangle_outline(frame, 12, 12, width - 24, height - 24, [200, 100, 100, 255], width);
 
     // Draw error title
-    draw_simple_text(frame, "DOWNLOAD ERROR", 50, 30, [255, 150, 150, 255], width);
+    draw_text_ab_glyph(frame, "DOWNLOAD ERROR", 50.0, 30.0, [255, 150, 150, 255], width);
     
     // Draw error message (split into lines if too long)
     let max_chars_per_line = 50;
@@ -568,7 +527,7 @@ fn draw_error_window(pixels: &mut Pixels, error_message: &str) {
     for word in words {
         if current_line.len() + word.len() + 1 > max_chars_per_line {
             if !current_line.is_empty() {
-                draw_simple_text(frame, &current_line, 30, y_offset, [200, 200, 200, 255], width);
+                draw_text_ab_glyph(frame, &current_line, 30.0, y_offset as f32, [200, 200, 200, 255], width);
                 y_offset += 20;
                 current_line.clear();
             }
@@ -581,11 +540,11 @@ fn draw_error_window(pixels: &mut Pixels, error_message: &str) {
     
     // Draw remaining line
     if !current_line.is_empty() {
-        draw_simple_text(frame, &current_line, 30, y_offset, [200, 200, 200, 255], width);
+        draw_text_ab_glyph(frame, &current_line, 30.0, y_offset as f32, [200, 200, 200, 255], width);
         y_offset += 20;
     }
     
     // Draw instructions
-    draw_simple_text(frame, "This window will close automatically in 5 seconds", 30, y_offset + 20, [180, 180, 180, 255], width);
-    draw_simple_text(frame, "or click the X to close manually", 30, y_offset + 40, [180, 180, 180, 255], width);
+    draw_text_ab_glyph(frame, "This window will close automatically in 5 seconds", 30.0, (y_offset + 20) as f32, [180, 180, 180, 255], width);
+    draw_text_ab_glyph(frame, "or click the X to close manually", 30.0, (y_offset + 40) as f32, [180, 180, 180, 255], width);
 }

@@ -187,24 +187,22 @@ fn draw_ball_with_effects(frame: &mut [u8], width: u32, height: u32, pos: (f32, 
                     // Yellow ball: 10x more expressive scaling (normal level)
                     let enhanced_audio = audio_value.powf(0.5); // Square root for smoother scaling
                     audio_scale = 0.2 + enhanced_audio * 4.8; // Range: 0.2 to 5.0
-                    
-                    // Add some dynamic pulsing based on audio peaks
+                      // Add some dynamic pulsing based on audio peaks
                     let pulse_factor = (audio_value * 10.0).sin() * 0.3 + 1.0;
                     audio_scale *= pulse_factor;
                     
-                    // Limit the scaling to prevent balls from becoming too large
-                    audio_scale = audio_scale.max(0.1).min(4.0);
+                    // Remove size cap to allow unlimited ball growth
+                    audio_scale = audio_scale.max(0.1);
                 } else {
                     // Green ball: 100x more responsive but much smaller (extreme responsiveness, compact size)
                     let enhanced_audio = audio_value.powf(0.3); // Cube root for even more dramatic response
                     audio_scale = 0.3 + enhanced_audio * 2.7; // Range: 0.3 to 3.0 (much smaller range but same responsiveness)
-                    
-                    // Add much more intense dynamic pulsing
+                      // Add much more intense dynamic pulsing
                     let pulse_factor = (audio_value * 20.0).sin() * 0.8 + 1.0; // More intense pulsing
                     audio_scale *= pulse_factor;
                     
-                    // Much smaller maximum limit to keep it compact
-                    audio_scale = audio_scale.max(0.1).min(2.5); // Much smaller maximum size
+                    // Remove size cap to allow unlimited ball growth
+                    audio_scale = audio_scale.max(0.1);
                 }
             }
         }

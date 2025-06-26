@@ -19,7 +19,7 @@ fn main() -> Result<(), Error> {
     let window = Arc::new({
         let size = LogicalSize::new(WIDTH as f64, HEIGHT as f64);
         WindowBuilder::new()
-            .with_title("StimStation - Ray Pattern")
+            .with_title("Welcome to StimStation!")
             .with_inner_size(size)
             .with_min_inner_size(size)
             .build(&event_loop)

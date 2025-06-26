@@ -1,7 +1,11 @@
 # Read ME, not ANYONE else lol
 
 **StimStation** is a **_VERY_ cool** visualizer written in Rust inspired by the visuals in short form "sludge" content
- 
+
+## Download
+
+Download here: https://stimstation-download-site.vercel.app/
+
 ## about
 
 Based on a lot of the visuals I see in short-form content I combined them all so make a "stimstation" of sorts

@@ -6,6 +6,12 @@
 
 Download here: https://stimstation-download-site.vercel.app/
 
+## Building
+
+1. Download rustup: https://rustup.rs/
+2. Open the extracted folder in the terminal
+3. Run "Cargo run --release"
+
 ## about
 
 Based on a lot of the visuals I see in short-form content I combined them all so make a "stimstation" of sorts

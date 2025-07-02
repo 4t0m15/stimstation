@@ -6,7 +6,7 @@
 
 Download here: https://stimstation-download-site.vercel.app/
 
-## Building
+## Building (if not on Windows)
 
 1. Download rustup: https://rustup.rs/
 2. Open the extracted folder in the terminal
